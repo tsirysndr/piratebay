@@ -1,12 +1,15 @@
 [package]
 name = "piratebay"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Rust library and CLI for The Pirate Bay"
 documentation = "https://docs.rs/piratebay"
 readme = "README.md"
 repository = "https://github.com/tsirysndr/piratebay"
 license = "MIT"
+authors = ["Tsiry Sandratraina <tsiry.sndr@aol.com>"]
+categories = ["command-line-utilities"]
+keywords = ["tokio", "torrent", "cli", "thepiratepay"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
