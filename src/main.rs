@@ -34,7 +34,7 @@ Search for torrents on the piratebay
                 )
                 .arg(
                     Arg::with_name("category")
-                        .help("The category to search")
+                        .help("The search category")
                         .required(false)
                         .index(2),
                 ),
