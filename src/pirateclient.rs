@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use surf::{Client, Config, Url};
+use urlencoding::encode;
 
 use crate::{
     constants::{
@@ -80,6 +81,40 @@ impl PirateClient {
             .recv_json::<Vec<Torrent>>()
             .await?;
 
+        Ok(res)
+    }
+    pub async fn get_info(&self, id: &str) -> Result<Torrent, surf::Error> {
+        let trackers: Vec<String> = vec![
+            encode("udp://tracker.coppersurfer.tk:6969/announce").to_string(),
+            encode("udp://9.rarbg.to:2920/announce").to_string(),
+            encode("udp://tracker.opentrackr.org:1337").to_string(),
+            encode("udp://tracker.internetwarriors.net:1337/announce").to_string(),
+            encode("udp://tracker.leechers-paradise.org:6969/announce").to_string(),
+            encode("udp://tracker.coppersurfer.tk:6969/announce").to_string(),
+            encode("udp://tracker.pirateparty.gr:6969/announce").to_string(),
+            encode("udp://tracker.cyberia.is:6969/announce").to_string(),
+            encode("udp://tracker.dler.org:6969/announce").to_string(),
+            encode("udp://tracker.torrent.eu.org:51/announce").to_string(),
+            encode("udp://tracker.tiny-vps.com:6969/announce").to_string(),
+            encode("udp://tracker.0x.tf:6969/announce").to_string(),
+            encode("udp://open.stealth.si:80/announce").to_string(),
+            encode("udp://movies.zsw.ca:6969/announce").to_string(),
+            encode("udp://tracker.openbittorrent.com:6969/announce").to_string(),
+            encode("udp://185.193.125.139:6969/announce").to_string(),
+            encode("udp://opentracker.i2p.rocks:6969/announce").to_string(),
+        ];
+
+        let mut res = self
+            .client
+            .get(format!("/api.php?url=/t.php?id={}", id))
+            .recv_json::<Torrent>()
+            .await?;
+        res.magnet = Some(format!(
+            "magnet:?xt=urn:btih:{}&dsn={}&tr={}",
+            encode(&res.name),
+            res.info_hash,
+            trackers.join("&tr=")
+        ));
         Ok(res)
     }
 }

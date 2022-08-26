@@ -1,5 +1,8 @@
 use clap::{arg, Arg, ArgAction, Command};
-use piratebay::{formater::format_results, pirateclient::PirateClient};
+use piratebay::{
+    formater::{format_result, format_results},
+    pirateclient::PirateClient,
+};
 use urlencoding::encode;
 
 fn cli() -> Command<'static> {
@@ -37,6 +40,16 @@ Search for torrents on the piratebay
                         .help("The search category")
                         .required(false)
                         .index(2),
+                ),
+        )
+        .subcommand(
+            Command::new("info")
+                .about("Get information about a torrent")
+                .arg(
+                    Arg::with_name("id")
+                        .help("The torrent id")
+                        .required(true)
+                        .index(1),
                 ),
         )
         .subcommand(
@@ -78,6 +91,10 @@ async fn main() -> Result<(), surf::Error> {
             let query = encode(sub_matches.get_one::<String>("query").unwrap());
             format_results(client.search(&query).await?);
         }
+        Some(("info", sub_matches)) => {
+            let id = sub_matches.get_one::<String>("id").unwrap();
+            format_result(client.get_info(&id).await?);
+        }
         Some(("category", sub_matches)) => {
             if *sub_matches.get_one::<bool>("audio").unwrap() {
                 format_results(client.list_audio().await?);
@@ -103,8 +120,3 @@ async fn main() -> Result<(), surf::Error> {
 
     Ok(())
 }
-
-/*
-EXAMPLE MAGNET LINK
-magnet:?xt=urn:btih:B304E27A9DA53791FA4B5E9B6D8D258CF63F7E58&dn=Kanye%20West%20-%20Donda%202%20(2022)%20Mp3%20320kbps&tr=udp%3A%2F%2F185.193.125.139%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fmovies.zsw.ca%3A6969%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.0x.tf%3A6969%2Fannounce&tr=udp%3A%2F%2Fopentracker.i2p.rocks%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.tiny-vps.com%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce
-*/

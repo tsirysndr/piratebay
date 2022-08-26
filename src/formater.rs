@@ -11,3 +11,13 @@ pub fn format_results(results: Vec<Torrent>) {
             .unwrap()
     );
 }
+
+pub fn format_result(result: Torrent) {
+    println!(
+        "{}",
+        serde_json::to_string(&result)
+            .unwrap()
+            .to_colored_json_auto()
+            .unwrap()
+    );
+}

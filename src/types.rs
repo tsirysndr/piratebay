@@ -18,4 +18,5 @@ pub struct Torrent {
     pub size: String,
     pub status: String,
     pub username: String,
+    pub magnet: Option<String>,
 }
