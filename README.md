@@ -4,6 +4,9 @@
   <a href="https://crates.io/crates/piratebay" target="_blank">
     <img src="https://img.shields.io/crates/v/piratebay.svg" />
   </a>
+  <a href="https://crates.io/crates/piratebay" target="_blank">
+    <img src="https://img.shields.io/crates/dr/piratebay" />
+  </a>
   <a href="https://docs.rs/piratebay" target="_blank">
     <img src="https://docs.rs/piratebay/badge.svg" />
   </a>
