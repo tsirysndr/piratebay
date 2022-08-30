@@ -13,6 +13,9 @@
   <a href="LICENSE" target="_blank">
     <img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-blue.svg" />
   </a>
+  <a href="https://github.com/tsirysndr/piratebay/actions/workflows/release.yml" target="_blank">
+    <img alt="License: MIT" src="https://github.com/tsirysndr/piratebay/actions/workflows/release.yml/badge.svg" />
+  </a>
 </p>
 
 PirateBay CLI helps you search torrents right from the terminal.
