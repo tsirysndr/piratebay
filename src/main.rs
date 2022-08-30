@@ -79,6 +79,7 @@ Search for torrents on the piratebay
                         .action(ArgAction::SetTrue),
                 ),
         )
+        .arg(arg!(-j --json ... "Output results in json format").required(false))
 }
 
 #[tokio::main]
@@ -86,33 +87,35 @@ async fn main() -> Result<(), surf::Error> {
     let client = PirateClient::new();
     let matches = cli().get_matches();
 
+    let json = matches.is_present("json");
+
     match matches.subcommand() {
         Some(("search", sub_matches)) => {
             let query = encode(sub_matches.get_one::<String>("query").unwrap());
-            format_results(client.search(&query).await?);
+            format_results(client.search(&query).await?, json);
         }
         Some(("info", sub_matches)) => {
             let id = sub_matches.get_one::<String>("id").unwrap();
-            format_result(client.get_info(&id).await?);
+            format_result(client.get_info(&id).await?, json);
         }
         Some(("category", sub_matches)) => {
             if *sub_matches.get_one::<bool>("audio").unwrap() {
-                format_results(client.list_audio().await?);
+                format_results(client.list_audio().await?, json);
             }
             if *sub_matches.get_one::<bool>("video").unwrap() {
-                format_results(client.list_video().await?);
+                format_results(client.list_video().await?, json);
             }
             if *sub_matches.get_one::<bool>("applications").unwrap() {
-                format_results(client.list_applications().await?);
+                format_results(client.list_applications().await?, json);
             }
             if *sub_matches.get_one::<bool>("games").unwrap() {
-                format_results(client.list_games().await?);
+                format_results(client.list_games().await?, json);
             }
             if *sub_matches.get_one::<bool>("porn").unwrap() {
-                format_results(client.list_porn().await?);
+                format_results(client.list_porn().await?, json);
             }
             if *sub_matches.get_one::<bool>("other").unwrap() {
-                format_results(client.list_other().await?);
+                format_results(client.list_other().await?, json);
             }
         }
         _ => unreachable!(),
