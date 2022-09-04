@@ -16,6 +16,9 @@
   <a href="https://github.com/tsirysndr/piratebay/actions/workflows/release.yml" target="_blank">
     <img alt="License: MIT" src="https://github.com/tsirysndr/piratebay/actions/workflows/release.yml/badge.svg" />
   </a>
+  <a href="https://github.com/tsirysndr/piratebay/actions/workflows/rust-clippy.yml" target="_blank">
+    <img alt="release" src="https://github.com/tsirysndr/piratebay/actions/workflows/rust-clippy.yml/badge.svg?branch=master" />
+  </a>
 </p>
 
 PirateBay CLI helps you search torrents right from the terminal.
