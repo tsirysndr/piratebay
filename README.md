@@ -21,6 +21,8 @@
   </a>
 </p>
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/S6S1ETN14)
+
 PirateBay CLI helps you search torrents right from the terminal.
 
 # Installation
