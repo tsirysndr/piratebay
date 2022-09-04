@@ -23,3 +23,37 @@ jobs:
         with:
           RUSTTARGET: ${{ matrix.target }}
           ARCHIVE_TYPES: ${{ matrix.archive }}
+      - name: Clean up
+        run: sudo rm -rf target
+      - name: Installing Rust toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-unknown-linux-gnu
+          override: true
+      - name: Running cargo build
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          toolchain: stable
+          args: --locked --release --target x86_64-unknown-linux-gnu"
+      - name: Set env
+        run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+      - name: Packaging final binary
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          cd target/x86_64-unknown-linux-gnu/release
+          tar czvf piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-linux-gnu.tar.gz piratebay
+          shasum -a 512 piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-linux-gnu.tar.gz > piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-linux-gnu.tar.gz.sha512
+      - name: Releasing assets
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            target/x86_64-unknown-linux-gnu/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-linux-gnu.tar.gz
+            target/x86_64-unknown-linux-gnu/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-linux-gnu.tar.gz.sha512
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
