@@ -37,6 +37,11 @@ Simply run:
 $ cargo install piratebay
 ```
 
+### macOS
+```bash
+$ brew install tsirysndr/tap/piratebay
+```
+
 Or download the latest release for your platform from [here](https://github.com/tsirysndr/piratebay/releases).
 
 <img src="https://raw.githubusercontent.com/tsirysndr/piratebay/master/preview.png" />
