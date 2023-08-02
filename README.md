@@ -38,8 +38,15 @@ $ cargo install piratebay
 ```
 
 ### macOS
+
 ```bash
 $ brew install tsirysndr/tap/piratebay
+```
+
+### Nix
+
+```bash
+nix profile install --experimental-features "nix-command flakes" github:tsirysndr/piratebay
 ```
 
 Or download the latest release for your platform from [here](https://github.com/tsirysndr/piratebay/releases).
