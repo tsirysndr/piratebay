@@ -8,7 +8,7 @@ use crate::{
         BASE_URL, CATEGORY_APPLICATIONS, CATEGORY_AUDIO, CATEGORY_GAMES, CATEGORY_OTHER,
         CATEGORY_PORN, CATEGORY_VIDEO,
     },
-    types::Torrent,
+    types::{Torrent, TorrentInfo},
 };
 
 pub struct PirateClient {
@@ -27,7 +27,7 @@ impl PirateClient {
     pub async fn search(&self, query: &str) -> Result<Vec<Torrent>, surf::Error> {
         let res = self
             .client
-            .get(format!("/api.php?url=/q.php?q={}", query))
+            .get(format!("/q.php?q={}", query))
             .recv_json::<Vec<Torrent>>()
             .await?;
         Ok(res)
@@ -83,7 +83,7 @@ impl PirateClient {
 
         Ok(res)
     }
-    pub async fn get_info(&self, id: &str) -> Result<Torrent, surf::Error> {
+    pub async fn get_info(&self, id: &str) -> Result<TorrentInfo, surf::Error> {
         let trackers: Vec<String> = vec![
             encode("udp://tracker.coppersurfer.tk:6969/announce").to_string(),
             encode("udp://9.rarbg.to:2920/announce").to_string(),
@@ -106,8 +106,8 @@ impl PirateClient {
 
         let mut res = self
             .client
-            .get(format!("/api.php?url=/t.php?id={}", id))
-            .recv_json::<Torrent>()
+            .get(format!("/t.php?id={}", id))
+            .recv_json::<TorrentInfo>()
             .await?;
         res.magnet = Some(format!(
             "magnet:?xt=urn:btih:{}&dsn={}&tr={}",

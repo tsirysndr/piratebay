@@ -1,21 +1,21 @@
 [package]
-name = "piratebay"
-version = "0.1.5"
-edition = "2021"
-description = "Rust library and CLI for The Pirate Bay"
-documentation = "https://docs.rs/piratebay"
-readme = "README.md"
-repository = "https://github.com/tsirysndr/piratebay"
-license = "MIT"
 authors = ["Tsiry Sandratraina <tsiry.sndr@aol.com>"]
 categories = ["command-line-utilities"]
+description = "Rust library and CLI for The Pirate Bay"
+documentation = "https://docs.rs/piratebay"
+edition = "2021"
 keywords = ["tokio", "torrent", "cli", "thepiratepay"]
+license = "MIT"
+name = "piratebay"
+readme = "README.md"
+repository = "https://github.com/tsirysndr/piratebay"
+version = "0.1.6"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 chrono = "0.4.22"
-clap = { version = "3.2.17", features = ["derive"] }
+clap = {version = "3.2.17", features = ["derive"]}
 colored_json = "2.1.0"
 const_format = "0.2.26"
 human-repr = "1.0.1"
@@ -25,5 +25,5 @@ serde = "1.0.143"
 serde_json = "1.0.83"
 surf = "2.3.2"
 tabled = "0.8.0"
-tokio = { version = "1.20.1", features = ["full"] }
+tokio = {version = "1.20.1", features = ["full"]}
 urlencoding = "2.1.0"
