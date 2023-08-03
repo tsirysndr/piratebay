@@ -49,6 +49,11 @@ $ brew install tsirysndr/tap/piratebay
 nix profile install --experimental-features "nix-command flakes" github:tsirysndr/piratebay
 ```
 
+### NetBSD
+```bash
+pkgin install piratebay
+```
+
 Or download the latest release for your platform from [here](https://github.com/tsirysndr/piratebay/releases).
 
 <img src="https://raw.githubusercontent.com/tsirysndr/piratebay/master/preview.png" />
