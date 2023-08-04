@@ -6,35 +6,51 @@ jobs:
   release:
     name: release x86_64-apple-darwin
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            archive: tar.gz tar.xz
+          - target: aarch64-apple-darwin
+            archive: tar.gz tar.xz
 
     steps:
-      - name: Installing Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: x86_64-apple-darwin
-          override: true
       - name: Checking out sources
         uses: actions/checkout@v1
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - uses: actions-rs/cargo@v1
+      - name: Install aarch64-apple-darwin toolchain
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: rustup target add aarch64-apple-darwin
       - name: Running cargo build
         uses: actions-rs/cargo@v1
         with:
           command: build
           toolchain: stable
-          args: --locked --release --target x86_64-apple-darwin"
+          args: --release --target ${{ matrix.target }}
       - name: Set env
         run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
       - name: Packaging final binary
         shell: bash
         run: |
-          cd target/x86_64-apple-darwin/release
-          tar czvf piratebay_${{ env.RELEASE_VERSION }}_x86_64-apple-darwin.tar.gz piratebay
-          shasum -a 512 piratebay_${{ env.RELEASE_VERSION }}_x86_64-apple-darwin.tar.gz > piratebay_${{ env.RELEASE_VERSION }}_x86_64-apple-darwin.tar.gz.sha512
+          cd target/${{ matrix.target }}/release
+          tar czvf piratebay_${{ env.RELEASE_VERSION }}_${{ matrix.target }}.tar.gz piratebay
+          shasum -a 256 piratebay_${{ env.RELEASE_VERSION }}_${{ matrix.target }}.tar.gz > piratebay_${{ env.RELEASE_VERSION }}_${{ matrix.target }}.tar.gz.sha256
       - name: Releasing assets
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            target/x86_64-apple-darwin/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-apple-darwin.tar.gz
-            target/x86_64-apple-darwin/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-apple-darwin.tar.gz.sha512
+            target/${{ matrix.target }}/release/piratebay_${{ env.RELEASE_VERSION }}_${{ matrix.target }}.tar.gz
+            target/${{ matrix.target }}/release/piratebay_${{ env.RELEASE_VERSION }}_${{ matrix.target }}.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
