@@ -43,11 +43,6 @@
           version = "0.1.6";
 
           buildInputs = [
-            # Add additional build inputs here
-            pkgs.openssl.dev
-            pkgs.pkgconfig
-            pkgs.gnumake
-            pkgs.perl
           ] ++ lib.optionals pkgs.stdenv.isDarwin [
             # Additional darwin specific inputs can be set here
             pkgs.libiconv
