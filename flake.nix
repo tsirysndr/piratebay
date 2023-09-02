@@ -1,5 +1,5 @@
 {
-  description = "piratebay - Quickly setup your development environment on your Chromebook/ChromeOS or any Linux distribution 🐧 ❄️ 💻 🚀 ✨";
+  description = "piratebay - A command-line tool written in Rust to search for torrents on piratebay ✨";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.05";
