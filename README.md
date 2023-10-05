@@ -1,6 +1,9 @@
 # The Pirate Bay CLI
 
 <p>
+  <a href="https://flakehub.com/flake/tsirysndr/piratebay" target="_blank">
+    <img src="https://img.shields.io/endpoint?url=https://flakehub.com/f/tsirysndr/piratebay/badge" />
+  </a>
   <a href="https://crates.io/crates/piratebay" target="_blank">
     <img src="https://img.shields.io/crates/v/piratebay.svg" />
   </a>
