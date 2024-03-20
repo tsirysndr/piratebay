@@ -4,6 +4,9 @@
   <a href="https://flakehub.com/flake/tsirysndr/piratebay" target="_blank">
     <img src="https://img.shields.io/endpoint?url=https://flakehub.com/f/tsirysndr/piratebay/badge" />
   </a>
+   <a href="https://flakestry.dev/flake/github/tsirysndr/piratebay" target="_blank">
+    <img src="https://flakestry.dev/api/badge/flake/github/tsirysndr/piratebay" />
+  </a>
   <a href="https://crates.io/crates/piratebay" target="_blank">
     <img src="https://img.shields.io/crates/v/piratebay.svg" />
   </a>
@@ -22,12 +25,6 @@
   <a href="https://github.com/tsirysndr/piratebay/actions/workflows/rust-clippy.yml" target="_blank">
     <img alt="release" src="https://github.com/tsirysndr/piratebay/actions/workflows/rust-clippy.yml/badge.svg?branch=master" />
   </a>
-</p>
-
-<p>
-<a href="https://www.buymeacoffee.com/tsiry">
-  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-red.png" alt="Buy Me A Coffee" height="40" />
-</a>
 </p>
 
 PirateBay CLI helps you search torrents right from the terminal.
