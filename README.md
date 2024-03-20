@@ -29,7 +29,7 @@
 
 PirateBay CLI helps you search torrents right from the terminal.
 
- <img src="https://vhs.charm.sh/vhs-5rMo6NdLmJxZ4w4U1nQDqz.gif" alt="Made with VHS">
+  <img src="https://vhs.charm.sh/vhs-6sDgMICizW9RTfFPPnaoed.gif" alt="Made with VHS">
   <a href="https://vhs.charm.sh">
     <img src="https://stuff.charm.sh/vhs/badge.svg">
   </a>
