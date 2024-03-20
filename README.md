@@ -29,6 +29,11 @@
 
 PirateBay CLI helps you search torrents right from the terminal.
 
+ <img src="https://vhs.charm.sh/vhs-5rMo6NdLmJxZ4w4U1nQDqz.gif" alt="Made with VHS">
+  <a href="https://vhs.charm.sh">
+    <img src="https://stuff.charm.sh/vhs/badge.svg">
+  </a>
+
 # Installation
 
 Simply run:
@@ -56,4 +61,3 @@ pkgin install piratebay
 
 Or download the latest release for your platform from [here](https://github.com/tsirysndr/piratebay/releases).
 
-<img src="https://raw.githubusercontent.com/tsirysndr/piratebay/master/preview.png" />
