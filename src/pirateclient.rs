@@ -83,37 +83,42 @@ impl PirateClient {
 
         Ok(res)
     }
-    pub async fn get_info(&self, id: &str) -> Result<TorrentInfo, surf::Error> {
-        let trackers: Vec<String> = vec![
-            encode("udp://tracker.coppersurfer.tk:6969/announce").to_string(),
-            encode("udp://9.rarbg.to:2920/announce").to_string(),
-            encode("udp://tracker.opentrackr.org:1337").to_string(),
-            encode("udp://tracker.internetwarriors.net:1337/announce").to_string(),
-            encode("udp://tracker.leechers-paradise.org:6969/announce").to_string(),
-            encode("udp://tracker.coppersurfer.tk:6969/announce").to_string(),
-            encode("udp://tracker.pirateparty.gr:6969/announce").to_string(),
-            encode("udp://tracker.cyberia.is:6969/announce").to_string(),
-            encode("udp://tracker.dler.org:6969/announce").to_string(),
-            encode("udp://tracker.torrent.eu.org:51/announce").to_string(),
-            encode("udp://tracker.tiny-vps.com:6969/announce").to_string(),
-            encode("udp://tracker.0x.tf:6969/announce").to_string(),
-            encode("udp://open.stealth.si:80/announce").to_string(),
-            encode("udp://movies.zsw.ca:6969/announce").to_string(),
-            encode("udp://tracker.openbittorrent.com:6969/announce").to_string(),
-            encode("udp://185.193.125.139:6969/announce").to_string(),
-            encode("udp://opentracker.i2p.rocks:6969/announce").to_string(),
-        ];
 
+    const TRACKERS: &'static [&'static str] = &[
+        "tracker.coppersurfer.tk:6969/announce",
+        "9.rarbg.to:2920/announce",
+        "tracker.opentrackr.org:1337",
+        "tracker.internetwarriors.net:1337/announce",
+        "tracker.leechers-paradise.org:6969/announce",
+        "tracker.coppersurfer.tk:6969/announce",
+        "tracker.pirateparty.gr:6969/announce",
+        "tracker.cyberia.is:6969/announce",
+        "tracker.dler.org:6969/announce",
+        "tracker.torrent.eu.org:51/announce",
+        "tracker.tiny-vps.com:6969/announce",
+        "tracker.0x.tf:6969/announce",
+        "open.stealth.si:80/announce",
+        "movies.zsw.ca:6969/announce",
+        "tracker.openbittorrent.com:6969/announce",
+        "185.193.125.139:6969/announce",
+        "opentracker.i2p.rocks:6969/announce",
+    ];
+
+    pub async fn get_info(&self, id: &str) -> Result<TorrentInfo, surf::Error> {
+        let trackers: Vec<String> = Self::TRACKERS
+            .iter()
+            .map(|t| encode(&format!("udp://{t}")).to_string())
+            .collect::<Vec<_>>();
         let mut res = self
             .client
             .get(format!("/t.php?id={}", id))
             .recv_json::<TorrentInfo>()
             .await?;
+        let name = encode(&res.name);
+        let info_hash = &res.info_hash;
+        let trackers = trackers.join("&tr=");
         res.magnet = Some(format!(
-            "magnet:?xt=urn:btih:{}&dsn={}&tr={}",
-            encode(&res.name),
-            res.info_hash,
-            trackers.join("&tr=")
+            "magnet:?xt=urn:btih:{info_hash}&dn={name}&tr={trackers}",
         ));
         Ok(res)
     }
