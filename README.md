@@ -51,6 +51,7 @@ $ brew install tsirysndr/tap/piratebay
 ### Nix
 
 ```bash
+cachix use tsirysndr
 nix profile install --experimental-features "nix-command flakes" github:tsirysndr/piratebay
 ```
 
