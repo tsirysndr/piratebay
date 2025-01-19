@@ -53,8 +53,6 @@ brew install tsirysndr/tap/piratebay
 ```bash
 yay -Syu piratebay
 ```
-```
-```
 
 ### Nix
 
