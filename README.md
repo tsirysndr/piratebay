@@ -45,7 +45,15 @@ $ cargo install piratebay
 ### macOS
 
 ```bash
-$ brew install tsirysndr/tap/piratebay
+brew install tsirysndr/tap/piratebay
+```
+
+## Arch Linux
+
+```bash
+yay -Syu piratebay
+```
+```
 ```
 
 ### Nix
