@@ -18,13 +18,12 @@ jobs:
       - uses: actions/checkout@master
       - name: Compile and release
         uses: rust-build/rust-build.action@v1.3.2
-        with:
-          TOOLCHAIN_VERSION: stable
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           RUSTTARGET: ${{ matrix.target }}
           ARCHIVE_TYPES: ${{ matrix.archive }}
+          TOOLCHAIN_VERSION: stable
       - name: Clean up
         run: sudo rm -rf target
       - name: Installing Rust toolchain
