@@ -9,7 +9,7 @@ license = "MIT"
 name = "piratebay"
 readme = "README.md"
 repository = "https://github.com/tsirysndr/piratebay"
-version = "0.1.9"
+version = "0.2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
