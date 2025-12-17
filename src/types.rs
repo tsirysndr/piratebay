@@ -19,7 +19,7 @@ pub struct Torrent {
     pub name: String,
     #[serde(rename = "num_files")]
     #[tabled(skip)]
-    pub num_files: String,
+    pub num_files: Option<String>,
     pub seeders: String,
     pub size: String,
     pub status: String,
@@ -46,7 +46,7 @@ pub struct TorrentInfo {
     pub name: String,
     #[serde(rename = "num_files")]
     #[tabled(skip)]
-    pub num_files: u32,
+    pub num_files: Option<u32>,
     pub seeders: u32,
     pub size: u64,
     pub status: String,
