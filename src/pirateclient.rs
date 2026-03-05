@@ -20,68 +20,53 @@ impl PirateClient {
         let client: Client = Config::new()
             .set_base_url(Url::parse(BASE_URL).unwrap())
             .set_timeout(Some(Duration::from_secs(60)))
+            .add_header("User-Agent", "piratebay-cli")
+            .unwrap()
             .try_into()
             .unwrap();
         Self { client }
     }
 
+    fn rate_limit_err() -> surf::Error {
+        surf::Error::from_str(
+            surf::StatusCode::TooManyRequests,
+            "Rate limited (429): too many requests, try again later",
+        )
+    }
+
     pub async fn search(&self, query: &str) -> Result<Vec<Torrent>, surf::Error> {
-        self.client
-            .get(format!("/q.php?q={}", query))
-            .recv_json()
-            .await
+        let mut res = self.client.get(format!("/q.php?q={}", query)).await?;
+        if res.status() == 429 {
+            return Err(Self::rate_limit_err());
+        }
+        res.body_json().await
+    }
+
+    async fn list_category(&self, category: &str) -> Result<Vec<Torrent>, surf::Error> {
+        let mut res = self.client.get(category).await?;
+        if res.status() == 429 {
+            return Err(Self::rate_limit_err());
+        }
+        res.body_json().await
     }
 
     pub async fn list_audio(&self) -> Result<Vec<Torrent>, surf::Error> {
-        let res = self
-            .client
-            .get(CATEGORY_AUDIO)
-            .recv_json::<Vec<Torrent>>()
-            .await?;
-        Ok(res)
+        self.list_category(CATEGORY_AUDIO).await
     }
     pub async fn list_video(&self) -> Result<Vec<Torrent>, surf::Error> {
-        let res = self
-            .client
-            .get(CATEGORY_VIDEO)
-            .recv_json::<Vec<Torrent>>()
-            .await?;
-        Ok(res)
+        self.list_category(CATEGORY_VIDEO).await
     }
     pub async fn list_applications(&self) -> Result<Vec<Torrent>, surf::Error> {
-        let res = self
-            .client
-            .get(CATEGORY_APPLICATIONS)
-            .recv_json::<Vec<Torrent>>()
-            .await?;
-        Ok(res)
+        self.list_category(CATEGORY_APPLICATIONS).await
     }
     pub async fn list_games(&self) -> Result<Vec<Torrent>, surf::Error> {
-        let res = self
-            .client
-            .get(CATEGORY_GAMES)
-            .recv_json::<Vec<Torrent>>()
-            .await?;
-
-        Ok(res)
+        self.list_category(CATEGORY_GAMES).await
     }
     pub async fn list_porn(&self) -> Result<Vec<Torrent>, surf::Error> {
-        let res = self
-            .client
-            .get(CATEGORY_PORN)
-            .recv_json::<Vec<Torrent>>()
-            .await?;
-
-        Ok(res)
+        self.list_category(CATEGORY_PORN).await
     }
     pub async fn list_other(&self) -> Result<Vec<Torrent>, surf::Error> {
-        let res = self
-            .client
-            .get(CATEGORY_OTHER)
-            .recv_json::<Vec<Torrent>>()
-            .await?;
-
-        Ok(res)
+        self.list_category(CATEGORY_OTHER).await
     }
 
     const TRACKERS: &'static [&'static str] = &[
@@ -112,11 +97,11 @@ impl PirateClient {
             .iter()
             .map(|t| encode(&format!("udp://{t}")).to_string())
             .collect::<Vec<_>>();
-        let mut res = self
-            .client
-            .get(format!("/t.php?id={}", id))
-            .recv_json::<TorrentInfo>()
-            .await?;
+        let mut response = self.client.get(format!("/t.php?id={}", id)).await?;
+        if response.status() == 429 {
+            return Err(Self::rate_limit_err());
+        }
+        let mut res: TorrentInfo = response.body_json().await?;
         let name = encode(&res.name);
         let info_hash = &res.info_hash;
         let trackers = trackers.join("&tr=");
