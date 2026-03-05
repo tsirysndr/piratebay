@@ -38,9 +38,9 @@
         # Common arguments can be set here to avoid repeating them later
         commonArgs = {
           inherit src;
-          
+
           pname = "piratebay";
-          version = "0.1.9";
+          version = "0.2.1";
 
           buildInputs = [
           ] ++ lib.optionals pkgs.stdenv.isDarwin [
