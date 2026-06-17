@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use colored_json::ToColoredJson;
 use human_repr::HumanCount;
 use owo_colors::OwoColorize;
@@ -78,15 +78,13 @@ fn format_date(s: &str) -> String {
         return s.to_string();
     }
     let timestamp = s.parse::<i64>().unwrap();
-    let naive = NaiveDateTime::from_timestamp(timestamp, 0);
-    let datetime: DateTime<Utc> = DateTime::from_utc(naive, Utc);
+    let datetime: DateTime<Utc> = DateTime::from_timestamp(timestamp, 0).unwrap();
     let date = datetime.format("%Y-%m-%d");
     return format!("{}", date);
 }
 
 fn format_date_i64(timestamp: i64) -> String {
-    let naive = NaiveDateTime::from_timestamp(timestamp, 0);
-    let datetime: DateTime<Utc> = DateTime::from_utc(naive, Utc);
+    let datetime: DateTime<Utc> = DateTime::from_timestamp(timestamp, 0).unwrap();
     let date = datetime.format("%Y-%m-%d");
     return format!("{}", date);
 }
