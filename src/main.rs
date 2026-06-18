@@ -83,7 +83,7 @@ Search for torrents on the piratebay
 }
 
 #[tokio::main]
-async fn main() -> Result<(), surf::Error> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = PirateClient::new();
     let matches = cli().get_matches();
 

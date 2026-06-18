@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use surf::{Client, Config, Url};
+use reqwest::{Client, StatusCode};
 use urlencoding::encode;
 
 use crate::{
@@ -11,61 +11,86 @@ use crate::{
     types::{Torrent, TorrentInfo},
 };
 
+#[derive(Debug)]
+pub enum ApiError {
+    Reqwest(reqwest::Error),
+    RateLimited,
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ApiError::Reqwest(e) => write!(f, "{e}"),
+            ApiError::RateLimited => f.write_str(
+                "Rate limited (429): too many requests, try again later",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ApiError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ApiError::Reqwest(e) => Some(e),
+            ApiError::RateLimited => None,
+        }
+    }
+}
+
+impl From<reqwest::Error> for ApiError {
+    fn from(e: reqwest::Error) -> Self {
+        ApiError::Reqwest(e)
+    }
+}
+
 pub struct PirateClient {
     client: Client,
 }
 
 impl PirateClient {
     pub fn new() -> Self {
-        let client: Client = Config::new()
-            .set_base_url(Url::parse(BASE_URL).unwrap())
-            .set_timeout(Some(Duration::from_secs(60)))
-            .add_header("User-Agent", "piratebay-cli")
-            .unwrap()
-            .try_into()
-            .unwrap();
+        let client = Client::builder()
+            .user_agent("piratebay-cli")
+            .timeout(Duration::from_secs(60))
+            .build()
+            .expect("reqwest client");
         Self { client }
     }
 
-    fn rate_limit_err() -> surf::Error {
-        surf::Error::from_str(
-            surf::StatusCode::TooManyRequests,
-            "Rate limited (429): too many requests, try again later",
-        )
-    }
-
-    pub async fn search(&self, query: &str) -> Result<Vec<Torrent>, surf::Error> {
-        let mut res = self.client.get(format!("/q.php?q={}", query)).await?;
-        if res.status() == 429 {
-            return Err(Self::rate_limit_err());
+    pub async fn search(&self, query: &str) -> Result<Vec<Torrent>, ApiError> {
+        let url = format!("{BASE_URL}/q.php?q={query}");
+        let res = self.client.get(&url).send().await?;
+        if res.status() == StatusCode::TOO_MANY_REQUESTS {
+            return Err(ApiError::RateLimited);
         }
-        res.body_json().await
+        Ok(res.json().await?)
     }
 
-    async fn list_category(&self, category: &str) -> Result<Vec<Torrent>, surf::Error> {
-        let mut res = self.client.get(category).await?;
-        if res.status() == 429 {
-            return Err(Self::rate_limit_err());
+    async fn list_category(&self, category: &str) -> Result<Vec<Torrent>, ApiError> {
+        let url = format!("{BASE_URL}{category}");
+        let res = self.client.get(&url).send().await?;
+        if res.status() == StatusCode::TOO_MANY_REQUESTS {
+            return Err(ApiError::RateLimited);
         }
-        res.body_json().await
+        Ok(res.json().await?)
     }
 
-    pub async fn list_audio(&self) -> Result<Vec<Torrent>, surf::Error> {
+    pub async fn list_audio(&self) -> Result<Vec<Torrent>, ApiError> {
         self.list_category(CATEGORY_AUDIO).await
     }
-    pub async fn list_video(&self) -> Result<Vec<Torrent>, surf::Error> {
+    pub async fn list_video(&self) -> Result<Vec<Torrent>, ApiError> {
         self.list_category(CATEGORY_VIDEO).await
     }
-    pub async fn list_applications(&self) -> Result<Vec<Torrent>, surf::Error> {
+    pub async fn list_applications(&self) -> Result<Vec<Torrent>, ApiError> {
         self.list_category(CATEGORY_APPLICATIONS).await
     }
-    pub async fn list_games(&self) -> Result<Vec<Torrent>, surf::Error> {
+    pub async fn list_games(&self) -> Result<Vec<Torrent>, ApiError> {
         self.list_category(CATEGORY_GAMES).await
     }
-    pub async fn list_porn(&self) -> Result<Vec<Torrent>, surf::Error> {
+    pub async fn list_porn(&self) -> Result<Vec<Torrent>, ApiError> {
         self.list_category(CATEGORY_PORN).await
     }
-    pub async fn list_other(&self) -> Result<Vec<Torrent>, surf::Error> {
+    pub async fn list_other(&self) -> Result<Vec<Torrent>, ApiError> {
         self.list_category(CATEGORY_OTHER).await
     }
 
@@ -92,16 +117,17 @@ impl PirateClient {
         "open.dstud.io:6969/announce",
     ];
 
-    pub async fn get_info(&self, id: &str) -> Result<TorrentInfo, surf::Error> {
+    pub async fn get_info(&self, id: &str) -> Result<TorrentInfo, ApiError> {
         let trackers: Vec<String> = Self::TRACKERS
             .iter()
             .map(|t| encode(&format!("udp://{t}")).to_string())
             .collect::<Vec<_>>();
-        let mut response = self.client.get(format!("/t.php?id={}", id)).await?;
-        if response.status() == 429 {
-            return Err(Self::rate_limit_err());
+        let url = format!("{BASE_URL}/t.php?id={id}");
+        let res = self.client.get(&url).send().await?;
+        if res.status() == StatusCode::TOO_MANY_REQUESTS {
+            return Err(ApiError::RateLimited);
         }
-        let mut res: TorrentInfo = response.body_json().await?;
+        let mut res: TorrentInfo = res.json().await?;
         let name = encode(&res.name);
         let info_hash = &res.info_hash;
         let trackers = trackers.join("&tr=");
