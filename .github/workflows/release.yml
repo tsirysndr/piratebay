@@ -1,6 +1,12 @@
 on:
   release:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and upload assets for (e.g. v0.3.0). The tag and matching GitHub release must already exist."
+        required: true
+        type: string
 
 jobs:
   release:
@@ -15,8 +21,11 @@ jobs:
           - target: x86_64-unknown-linux-musl
             archive: tar.gz tar.xz
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - name: Compile and release
+        if: github.event_name == 'release'
         uses: rust-build/rust-build.action@v1.3.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -37,7 +46,12 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: cargo build --locked --release --target x86_64-unknown-linux-gnu
       - name: Set env
-        run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "RELEASE_VERSION=${{ inputs.tag }}" >> $GITHUB_ENV
+          else
+            echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+          fi
       - name: Packaging final binary
         if: matrix.target == 'x86_64-unknown-linux-musl'
         shell: bash
@@ -49,8 +63,45 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-musl'
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ env.RELEASE_VERSION }}
           files: |
             target/x86_64-unknown-linux-gnu/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-linux-gnu.tar.gz
             target/x86_64-unknown-linux-gnu/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-linux-gnu.tar.gz.sha512
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-linux-aarch64:
+    name: release aarch64-unknown-linux-gnu
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Installing Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - name: Running cargo build
+        run: cargo build --locked --release --target aarch64-unknown-linux-gnu
+      - name: Set env
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "RELEASE_VERSION=${{ inputs.tag }}" >> $GITHUB_ENV
+          else
+            echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+          fi
+      - name: Packaging final binary
+        shell: bash
+        run: |
+          cd target/aarch64-unknown-linux-gnu/release
+          tar czvf piratebay_${{ env.RELEASE_VERSION }}_aarch64-unknown-linux-gnu.tar.gz piratebay
+          shasum -a 512 piratebay_${{ env.RELEASE_VERSION }}_aarch64-unknown-linux-gnu.tar.gz > piratebay_${{ env.RELEASE_VERSION }}_aarch64-unknown-linux-gnu.tar.gz.sha512
+      - name: Releasing assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_VERSION }}
+          files: |
+            target/aarch64-unknown-linux-gnu/release/piratebay_${{ env.RELEASE_VERSION }}_aarch64-unknown-linux-gnu.tar.gz
+            target/aarch64-unknown-linux-gnu/release/piratebay_${{ env.RELEASE_VERSION }}_aarch64-unknown-linux-gnu.tar.gz.sha512
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
