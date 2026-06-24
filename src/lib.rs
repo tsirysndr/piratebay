@@ -15,6 +15,7 @@
 //! PirateBay is a Rust library for the [Pirate Bay](https://thepiratebay.org)
 
 pub mod constants;
+pub mod download;
 pub mod formater;
 pub mod pirateclient;
 pub mod types;

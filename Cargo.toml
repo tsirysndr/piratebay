@@ -9,16 +9,20 @@ license = "MIT"
 name = "piratebay"
 readme = "README.md"
 repository = "https://github.com/tsirysndr/piratebay"
-version = "0.2.2"
+version = "0.3.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anstyle = "1"
+anyhow = "1"
 chrono = "0.4.22"
-clap = {version = "3.2.17", features = ["derive"]}
+clap = {version = "4.5", features = ["derive", "color"]}
 colored_json = "2.1.0"
 const_format = "0.2.26"
 human-repr = "1.0.1"
+indicatif = "0.17"
+librqbit = {version = "8.1", default-features = false, features = ["rust-tls"]}
 owo-colors = "3.5.0"
 scraper = "0.13.0"
 serde = {version = "1.0.143", features = ["derive"]}
