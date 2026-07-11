@@ -18,4 +18,5 @@ pub mod constants;
 pub mod download;
 pub mod formater;
 pub mod pirateclient;
+pub mod tui;
 pub mod types;

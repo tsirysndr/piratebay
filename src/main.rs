@@ -6,25 +6,29 @@ use piratebay::{
     download::download,
     formater::{format_result, format_results},
     pirateclient::PirateClient,
+    tui,
 };
 use urlencoding::encode;
 
-const SYNTH_PURPLE: Color = Color::Rgb(RgbColor(0xBD, 0x00, 0xFF));
-const SYNTH_PINK: Color = Color::Rgb(RgbColor(0xFF, 0x2A, 0x6D));
-const SYNTH_LIGHT_PINK: Color = Color::Rgb(RgbColor(0xFF, 0x6E, 0xC7));
-const SYNTH_CYAN: Color = Color::Rgb(RgbColor(0x01, 0xCD, 0xFE));
-const SYNTH_NEON_CYAN: Color = Color::Rgb(RgbColor(0x05, 0xD9, 0xE8));
-const SYNTH_ORANGE: Color = Color::Rgb(RgbColor(0xFF, 0x6C, 0x11));
+// Shared palette: teal primary, cyan secondary, purple accent, green
+// highlight, orange link, sky blue, red error.
+const C_PRIMARY: Color = Color::Rgb(RgbColor(0, 232, 198));
+const C_SECONDARY: Color = Color::Rgb(RgbColor(0, 198, 232));
+const C_ACCENT: Color = Color::Rgb(RgbColor(130, 100, 255));
+const C_HIGHLIGHT: Color = Color::Rgb(RgbColor(100, 232, 130));
+const C_LINK: Color = Color::Rgb(RgbColor(255, 160, 100));
+const C_SKY: Color = Color::Rgb(RgbColor(0, 210, 255));
+const C_ERROR: Color = Color::Rgb(RgbColor(255, 100, 100));
 
-fn charm_styles() -> Styles {
+fn theme_styles() -> Styles {
     Styles::styled()
-        .header(SYNTH_PINK.on_default() | Effects::BOLD)
-        .usage(SYNTH_PURPLE.on_default() | Effects::BOLD)
-        .literal(SYNTH_NEON_CYAN.on_default() | Effects::BOLD)
-        .placeholder(SYNTH_LIGHT_PINK.on_default())
-        .error(SYNTH_ORANGE.on_default() | Effects::BOLD)
-        .valid(SYNTH_CYAN.on_default() | Effects::BOLD)
-        .invalid(SYNTH_PINK.on_default() | Effects::BOLD)
+        .header(C_PRIMARY.on_default() | Effects::BOLD)
+        .usage(C_SKY.on_default() | Effects::BOLD)
+        .literal(C_SECONDARY.on_default() | Effects::BOLD)
+        .placeholder(C_ACCENT.on_default())
+        .error(C_ERROR.on_default() | Effects::BOLD)
+        .valid(C_HIGHLIGHT.on_default() | Effects::BOLD)
+        .invalid(C_LINK.on_default() | Effects::BOLD)
 }
 
 fn cli() -> Command {
@@ -32,7 +36,7 @@ fn cli() -> Command {
     Command::new("piratebay")
         .version(VERSION)
         .author("Tsiry Sandratraina <tsiry.sndr@aol.com>")
-        .styles(charm_styles())
+        .styles(theme_styles())
         .about(
             r#"
 
@@ -48,7 +52,18 @@ fn cli() -> Command {
 Search and download torrents from The Pirate Bay
 "#,
         )
-        .subcommand_required(true)
+        .subcommand(
+            Command::new("tui")
+                .about("Launch the interactive terminal UI (default when run with no arguments)")
+                .arg(
+                    Arg::new("output")
+                        .short('o')
+                        .long("output")
+                        .help("Directory downloads are saved to (default: current directory)")
+                        .value_name("DIR")
+                        .num_args(1),
+                ),
+        )
         .subcommand(
             Command::new("search")
                 .about("Search for torrents")
@@ -66,12 +81,14 @@ Search and download torrents from The Pirate Bay
                 ),
         )
         .subcommand(
-            Command::new("info").about("Get information about a torrent").arg(
-                Arg::new("id")
-                    .help("The torrent id")
-                    .required(true)
-                    .index(1),
-            ),
+            Command::new("info")
+                .about("Get information about a torrent")
+                .arg(
+                    Arg::new("id")
+                        .help("The torrent id")
+                        .required(true)
+                        .index(1),
+                ),
         )
         .subcommand(
             Command::new("download")
@@ -162,6 +179,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let json = matches.get_flag("json");
 
     match matches.subcommand() {
+        Some(("tui", sub_matches)) => {
+            let output = sub_matches
+                .get_one::<String>("output")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| std::env::current_dir().expect("cwd"));
+            tui::run(output).await?;
+        }
+        None => {
+            let output = std::env::current_dir().expect("cwd");
+            tui::run(output).await?;
+        }
         Some(("search", sub_matches)) => {
             let json = json || sub_matches.get_flag("json");
             let query = encode(sub_matches.get_one::<String>("query").unwrap());

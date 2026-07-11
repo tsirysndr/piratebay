@@ -21,9 +21,9 @@ impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ApiError::Reqwest(e) => write!(f, "{e}"),
-            ApiError::RateLimited => f.write_str(
-                "Rate limited (429): too many requests, try again later",
-            ),
+            ApiError::RateLimited => {
+                f.write_str("Rate limited (429): too many requests, try again later")
+            }
         }
     }
 }
@@ -117,23 +117,27 @@ impl PirateClient {
         "open.dstud.io:6969/announce",
     ];
 
-    pub async fn get_info(&self, id: &str) -> Result<TorrentInfo, ApiError> {
-        let trackers: Vec<String> = Self::TRACKERS
+    /// Build a magnet link from an info hash and display name, embedding the
+    /// full tracker list. Works with the `info_hash` returned by both `search`
+    /// and `get_info`, so callers can download straight from a search result.
+    pub fn magnet_for(info_hash: &str, name: &str) -> String {
+        let trackers = Self::TRACKERS
             .iter()
             .map(|t| encode(&format!("udp://{t}")).to_string())
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+            .join("&tr=");
+        let name = encode(name);
+        format!("magnet:?xt=urn:btih:{info_hash}&dn={name}&tr={trackers}")
+    }
+
+    pub async fn get_info(&self, id: &str) -> Result<TorrentInfo, ApiError> {
         let url = format!("{BASE_URL}/t.php?id={id}");
         let res = self.client.get(&url).send().await?;
         if res.status() == StatusCode::TOO_MANY_REQUESTS {
             return Err(ApiError::RateLimited);
         }
         let mut res: TorrentInfo = res.json().await?;
-        let name = encode(&res.name);
-        let info_hash = &res.info_hash;
-        let trackers = trackers.join("&tr=");
-        res.magnet = Some(format!(
-            "magnet:?xt=urn:btih:{info_hash}&dn={name}&tr={trackers}",
-        ));
+        res.magnet = Some(Self::magnet_for(&res.info_hash, &res.name));
         Ok(res)
     }
 }
@@ -141,5 +145,21 @@ impl PirateClient {
 impl Default for PirateClient {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn magnet_for_builds_valid_uri() {
+        let magnet = PirateClient::magnet_for("ABCDEF0123456789", "Ubuntu 24.04 LTS");
+        assert!(magnet.starts_with("magnet:?xt=urn:btih:ABCDEF0123456789"));
+        // Display name is URL-encoded.
+        assert!(magnet.contains("dn=Ubuntu%2024.04%20LTS"));
+        // Every configured tracker is appended as an encoded udp:// announce URL.
+        assert_eq!(magnet.matches("&tr=").count(), PirateClient::TRACKERS.len());
+        assert!(magnet.contains("udp%3A%2F%2F"));
     }
 }

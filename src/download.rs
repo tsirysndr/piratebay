@@ -45,13 +45,13 @@ pub async fn download(target: &str, output: PathBuf, stream: bool) -> Result<()>
     let name = handle.name().unwrap_or_else(|| "(unknown)".into());
     eprintln!(
         "\n{} {}",
-        "::".truecolor(0xFF, 0x2A, 0x6D).bold(),
-        name.truecolor(0xBD, 0x00, 0xFF).bold()
+        "::".truecolor(0, 232, 198).bold(),
+        name.truecolor(130, 100, 255).bold()
     );
     eprintln!(
         "{} {}",
-        "->".truecolor(0xFF, 0x2A, 0x6D),
-        output.display().truecolor(0x05, 0xD9, 0xE8)
+        "->".truecolor(0, 232, 198),
+        output.display().truecolor(0, 210, 255)
     );
 
     let total = handle.stats().total_bytes;
@@ -66,9 +66,9 @@ pub async fn download(target: &str, output: PathBuf, stream: bool) -> Result<()>
         let (file_id, name, size) = pick_stream_file(&handle)?;
         eprintln!(
             "{} {} {}",
-            "stream:".truecolor(0xFF, 0x2A, 0x6D).bold(),
-            name.truecolor(0xFF, 0x6E, 0xC7),
-            format!("({} bytes)", size).truecolor(0x6C, 0x6C, 0x6C)
+            "stream:".truecolor(0, 232, 198).bold(),
+            name.truecolor(0, 210, 255),
+            format!("({} bytes)", size).truecolor(200, 210, 220)
         );
         let mut reader = handle
             .clone()
@@ -103,8 +103,8 @@ pub async fn download(target: &str, output: PathBuf, stream: bool) -> Result<()>
 
     eprintln!(
         "\n{} saved to {}\n",
-        "✓".truecolor(0x01, 0xCD, 0xFE).bold(),
-        output.display().truecolor(0xBD, 0x00, 0xFF)
+        "✓".truecolor(100, 232, 130).bold(),
+        output.display().truecolor(130, 100, 255)
     );
     Ok(())
 }
@@ -135,10 +135,12 @@ async fn resolve_input(target: &str) -> Result<AddTorrent<'static>> {
 
 fn make_progress_bar(total: u64) -> ProgressBar {
     let pb = ProgressBar::new(total.max(1));
-    let tmpl = "  {spinner:.129} [{elapsed_precise:.99}] \
-                [{bar:32.129/237}] \
-                {bytes:>10.51}/{total_bytes:.99} \
-                {bytes_per_sec:>11.198}  ETA {eta:.212}";
+    // 256-colour indices approximating the theme: teal 43, sky 45, orange 215,
+    // muted 250 (indicatif's template syntax doesn't take truecolor RGB).
+    let tmpl = "  {spinner:.43} [{elapsed_precise:.250}] \
+                [{bar:32.43/238}] \
+                {bytes:>10.45}/{total_bytes:.250} \
+                {bytes_per_sec:>11.215}  ETA {eta:.250}";
     pb.set_style(
         ProgressStyle::with_template(tmpl)
             .unwrap()
