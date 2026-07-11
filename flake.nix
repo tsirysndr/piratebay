@@ -45,8 +45,10 @@
             pkgs.libiconv
           ];
 
-          # Additional environment variables can be set directly
-          # MY_CUSTOM_VAR = "some value";
+          # The test suite constructs a reqwest/rustls client, which eagerly
+          # loads native CA certificates. The Nix sandbox has none, so point it
+          # at cacert's bundle (honoured by rustls-native-certs via SSL_CERT_FILE).
+          SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
         };
 
         craneLibLLvmTools = craneLib.overrideToolchain
