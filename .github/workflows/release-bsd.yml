@@ -96,3 +96,49 @@ jobs:
             target/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-netbsd.tar.gz.sha512
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  openbsd:
+    name: release x86_64-unknown-openbsd
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set env
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "RELEASE_VERSION=${{ inputs.tag }}" >> $GITHUB_ENV
+          else
+            echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+          fi
+
+      - name: Build in OpenBSD VM
+        uses: vmactions/openbsd-vm@v1
+        with:
+          release: "7.6"
+          usesh: true
+          prepare: |
+            pkg_add -I rust
+          run: |
+            # OpenBSD's default class caps datasize; raise it so large
+            # Rust builds don't hit "memory allocation failed".
+            ulimit -d "$(ulimit -Hd)" 2>/dev/null || true
+            cargo build --locked --release
+
+      - name: Packaging final binary
+        shell: bash
+        run: |
+          cd target/release
+          tar czvf piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-openbsd.tar.gz piratebay
+          shasum -a 512 piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-openbsd.tar.gz > piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-openbsd.tar.gz.sha512
+
+      - name: Releasing assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_VERSION }}
+          files: |
+            target/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-openbsd.tar.gz
+            target/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-openbsd.tar.gz.sha512
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
