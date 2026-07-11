@@ -1,5 +1,5 @@
 Name:           piratebay
-Version:        0.4.0
+Version:        0.4.1
 Release:        1%{?dist}
 Summary:        Search and download torrents from The Pirate Bay from your terminal
 
