@@ -1,0 +1,98 @@
+name: release-bsd
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and upload assets for (e.g. v0.3.0). The tag and matching GitHub release must already exist."
+        required: true
+        type: string
+
+jobs:
+  freebsd:
+    name: release x86_64-unknown-freebsd
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set env
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "RELEASE_VERSION=${{ inputs.tag }}" >> $GITHUB_ENV
+          else
+            echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+          fi
+
+      - name: Build in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.2"
+          usesh: true
+          prepare: |
+            pkg install -y rust
+          run: |
+            cargo build --locked --release
+
+      - name: Packaging final binary
+        shell: bash
+        run: |
+          cd target/release
+          tar czvf piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-freebsd.tar.gz piratebay
+          shasum -a 512 piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-freebsd.tar.gz > piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-freebsd.tar.gz.sha512
+
+      - name: Releasing assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_VERSION }}
+          files: |
+            target/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-freebsd.tar.gz
+            target/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-freebsd.tar.gz.sha512
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  netbsd:
+    name: release x86_64-unknown-netbsd
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set env
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "RELEASE_VERSION=${{ inputs.tag }}" >> $GITHUB_ENV
+          else
+            echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+          fi
+
+      - name: Build in NetBSD VM
+        uses: vmactions/netbsd-vm@v1
+        with:
+          release: "10.1"
+          usesh: true
+          prepare: |
+            pkgin -y install rust
+          run: |
+            cargo build --locked --release
+
+      - name: Packaging final binary
+        shell: bash
+        run: |
+          cd target/release
+          tar czvf piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-netbsd.tar.gz piratebay
+          shasum -a 512 piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-netbsd.tar.gz > piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-netbsd.tar.gz.sha512
+
+      - name: Releasing assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_VERSION }}
+          files: |
+            target/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-netbsd.tar.gz
+            target/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-netbsd.tar.gz.sha512
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
