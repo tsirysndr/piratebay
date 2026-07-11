@@ -27,22 +27,111 @@
   </a>
 </p>
 
-PirateBay CLI helps you search **and download** torrents right from the terminal — pure Rust, async (tokio), no native C dependencies.
+PirateBay helps you search **and download** torrents right from the terminal — pure Rust, async (tokio), no native C dependencies. It ships as an interactive **TUI**, a scriptable **CLI**, and a reusable **library**.
 
 <a href="https://pocketenv.io/new?repo=tangled:tsiry-sandratraina.com/piratebay" target="_blank"><img src="https://pocketenv.io/open-in-pocketenv.svg" alt="Open in Pocketenv" /></a>
 
   <img src="preview.png" alt="PirateBay TUI preview">
 
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Interactive TUI](#interactive-tui)
+  - [Keybindings](#keybindings)
+- [CLI Usage](#cli-usage)
+  - [Search](#search)
+  - [Get torrent info (and magnet link)](#get-torrent-info-and-magnet-link)
+  - [Browse a category](#browse-a-category)
+  - [Download](#download)
+  - [Streaming to a media player](#streaming-to-a-media-player)
+  - [JSON output](#json-output)
+- [Categories](#categories)
+- [Library](#library)
+- [Development](#development)
+- [License](#license)
+
 # Features
 
+- **Interactive TUI** (built with [ratatui](https://ratatui.rs)) — search, browse by category, inspect details, download, and copy magnet links without leaving the terminal
 - Search The Pirate Bay from the terminal (table or `--json` output)
-- Browse by category (audio, video, applications, games, other)
+- Browse by category (audio, video, applications, games, XXX, other)
 - Pure-Rust torrent downloader (powered by [`librqbit`](https://crates.io/crates/librqbit), rustls only — **no OpenSSL, no system C libs**)
 - Live progress bar with throughput (bytes/sec) and ETA
 - `--stream` mode: pipe the largest file to stdout as it downloads — works with mpv, VLC, ffplay
-- Synthwave-themed CLI help
+- Copy magnet links straight to the system clipboard (via OSC 52 — works over SSH)
+- Usable as an async Rust **library** (`use piratebay::pirateclient::PirateClient`)
+- A cohesive color theme shared across the TUI, CLI help, and download progress
 
-# Usage
+# Installation
+
+Simply run:
+
+```bash
+$ cargo install piratebay
+```
+
+### macOS
+
+```bash
+brew install tsirysndr/tap/piratebay
+```
+
+## Arch Linux
+
+```bash
+yay -Syu piratebay
+```
+
+### Nix
+
+```bash
+cachix use tsirysndr
+nix profile install --experimental-features "nix-command flakes" github:tsirysndr/piratebay
+```
+
+### NetBSD
+```bash
+pkgin install piratebay
+```
+
+Or download the latest release for your platform from [here](https://github.com/tsirysndr/piratebay/releases).
+
+# Interactive TUI
+
+Run with **no arguments** (or `piratebay tui`) to launch the full-screen terminal UI:
+
+```bash
+piratebay                      # launches the TUI
+piratebay tui                  # same thing
+piratebay tui -o ~/Downloads   # choose the download folder
+```
+
+The TUI gives you a search bar, category tabs, a scrollable results table, a
+torrent detail popup (with the full magnet link), and a live download panel with
+per-torrent progress bars — all driven from the keyboard.
+
+## Keybindings
+
+| Key                | Action                                |
+| ------------------ | ------------------------------------- |
+| `/` or `i`         | Focus the search box                  |
+| `Enter`            | Run search / open the detail popup    |
+| `Esc`              | Leave the search box / close a popup  |
+| `↑` `↓` or `j` `k` | Move the selection                    |
+| `PgUp` `PgDn`      | Jump by a page                        |
+| `g` `G`            | Jump to top / bottom                  |
+| `←` `→` or `Tab`   | Previous / next category              |
+| `d`                | Download the selected torrent         |
+| `c` or `y`         | Copy the magnet link to the clipboard |
+| `r`                | Refresh the current view              |
+| `?`                | Toggle the help popup                 |
+| `q`                | Quit                                  |
+
+Inside the search box, `←` `→`, `Home`/`End`, and `Backspace`/`Delete` edit the
+query at the cursor position.
+
+# CLI Usage
 
 ## Search
 
@@ -94,36 +183,78 @@ piratebay download <id-or-magnet> --stream | vlc -
 piratebay download <id-or-magnet> --stream | ffplay -i pipe:0
 ```
 
-# Installation
+## JSON output
 
-Simply run:
-
-```bash
-$ cargo install piratebay
-```
-
-### macOS
+Every read command accepts a global `--json` (`-j`) flag, so results can be piped
+into tools like [`jq`](https://jqlang.github.io/jq/):
 
 ```bash
-brew install tsirysndr/tap/piratebay
+piratebay search "ubuntu" --json | jq '.[] | {name, seeders, size}'
+piratebay info 72614907 --json
+piratebay category --games --json
 ```
 
-## Arch Linux
+# Categories
+
+`piratebay category` lists the most recent torrents in a section:
+
+| Flag                   | Category     | Code |
+| ---------------------- | ------------ | ---- |
+| `-a`, `--audio`        | Audio        | 100  |
+| `-v`, `--video`        | Video        | 200  |
+| `-p`, `--applications` | Applications | 300  |
+| `-g`, `--games`        | Games        | 400  |
+| `-n`, `--porn`         | XXX          | 500  |
+| `-o`, `--other`        | Other        | 600  |
+
+# Library
+
+`piratebay` is also published as a crate, so you can query The Pirate Bay from
+your own async Rust code:
 
 ```bash
-yay -Syu piratebay
+cargo add piratebay tokio --features tokio/full
 ```
 
-### Nix
+```rust
+use piratebay::pirateclient::PirateClient;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let client = PirateClient::new();
+
+    // Search
+    let results = client.search("debian 12").await?;
+    for t in results.iter().take(5) {
+        println!("{} — {} seeders — {} bytes", t.name, t.seeders, t.size);
+    }
+
+    // Build a magnet link from a search result
+    if let Some(t) = results.first() {
+        let magnet = PirateClient::magnet_for(&t.info_hash, &t.name);
+        println!("{magnet}");
+    }
+
+    Ok(())
+}
+```
+
+See the full API on [docs.rs](https://docs.rs/piratebay).
+
+# Development
 
 ```bash
-cachix use tsirysndr
-nix profile install --experimental-features "nix-command flakes" github:tsirysndr/piratebay
+git clone https://github.com/tsirysndr/piratebay
+cd piratebay
+
+cargo build --release   # build the CLI/TUI
+cargo run --release      # launch the TUI
+cargo test               # run the test suite
 ```
 
-### NetBSD
-```bash
-pkgin install piratebay
-```
+CI runs `cargo fmt --check`, `cargo clippy -D warnings`, and `cargo test` on
+every push and pull request.
 
-Or download the latest release for your platform from [here](https://github.com/tsirysndr/piratebay/releases).
+# License
+
+Licensed under the [MIT License](LICENSE).
