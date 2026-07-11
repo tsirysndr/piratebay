@@ -11,9 +11,25 @@ on:
         type: string
 
 jobs:
-  freebsd:
-    name: release x86_64-unknown-freebsd
+  build-bsd:
+    name: release ${{ matrix.triple }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: freebsd
+            os_version: "14.3"
+            triple: x86_64-unknown-freebsd
+            install_rust: sudo env ASSUME_ALWAYS_YES=YES pkg install -y rust
+          - os: netbsd
+            os_version: "10.1"
+            triple: x86_64-unknown-netbsd
+            install_rust: sudo pkgin -y update && sudo pkgin -y install rust
+          - os: openbsd
+            os_version: "7.9"
+            triple: x86_64-unknown-openbsd
+            install_rust: sudo pkg_add rust
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,121 +43,43 @@ jobs:
             echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
           fi
 
-      - name: Build in FreeBSD VM
-        uses: vmactions/freebsd-vm@v1
+      - name: Start ${{ matrix.os }} VM
+        uses: cross-platform-actions/action@v1.3.0
         with:
-          release: "14.2"
-          usesh: true
-          prepare: |
-            pkg install -y rust
-          run: |
-            cargo build --locked --release
+          operating_system: ${{ matrix.os }}
+          version: ${{ matrix.os_version }}
+          architecture: x86-64
+          shell: bash
+          memory: 8G
+          cpu_count: 4
+
+      - name: Build in VM
+        shell: cpa.sh {0}
+        run: |
+          set -euo pipefail
+          ${{ matrix.install_rust }}
+          # OpenBSD's default datasize ulimit is too low for rustc.
+          ulimit -d "$(ulimit -H -d)" 2>/dev/null || true
+          # Keep target/ out of the workspace so it isn't synced back.
+          export CARGO_TARGET_DIR="$HOME/build"
+          cargo build --release --locked
+          mkdir -p dist
+          cp "$CARGO_TARGET_DIR/release/piratebay" dist/piratebay
 
       - name: Packaging final binary
         shell: bash
         run: |
-          cd target/release
-          tar czvf piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-freebsd.tar.gz piratebay
-          shasum -a 512 piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-freebsd.tar.gz > piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-freebsd.tar.gz.sha512
+          set -euo pipefail
+          archive="piratebay_${RELEASE_VERSION}_${{ matrix.triple }}.tar.gz"
+          tar -C dist -czvf "$archive" piratebay
+          shasum -a 512 "$archive" > "$archive.sha512"
 
       - name: Releasing assets
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.RELEASE_VERSION }}
           files: |
-            target/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-freebsd.tar.gz
-            target/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-freebsd.tar.gz.sha512
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  netbsd:
-    name: release x86_64-unknown-netbsd
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag || github.ref }}
-
-      - name: Set env
-        run: |
-          if [ -n "${{ inputs.tag }}" ]; then
-            echo "RELEASE_VERSION=${{ inputs.tag }}" >> $GITHUB_ENV
-          else
-            echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
-          fi
-
-      - name: Build in NetBSD VM
-        uses: vmactions/netbsd-vm@v1
-        with:
-          release: "10.1"
-          usesh: true
-          prepare: |
-            pkgin -y install rust
-          run: |
-            cargo build --locked --release
-
-      - name: Packaging final binary
-        shell: bash
-        run: |
-          cd target/release
-          tar czvf piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-netbsd.tar.gz piratebay
-          shasum -a 512 piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-netbsd.tar.gz > piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-netbsd.tar.gz.sha512
-
-      - name: Releasing assets
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ env.RELEASE_VERSION }}
-          files: |
-            target/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-netbsd.tar.gz
-            target/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-netbsd.tar.gz.sha512
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  openbsd:
-    name: release x86_64-unknown-openbsd
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag || github.ref }}
-
-      - name: Set env
-        run: |
-          if [ -n "${{ inputs.tag }}" ]; then
-            echo "RELEASE_VERSION=${{ inputs.tag }}" >> $GITHUB_ENV
-          else
-            echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
-          fi
-
-      - name: Build in OpenBSD VM
-        uses: vmactions/openbsd-vm@v1
-        with:
-          release: "7.6"
-          usesh: true
-          prepare: |
-            pkg_add -I rust
-          run: |
-            # Packages install to /usr/local/bin, which isn't on the default
-            # PATH of the VM's sh — add it so cargo/rustc are found.
-            export PATH="/usr/local/bin:$PATH"
-            # OpenBSD's default class caps datasize; raise it so large
-            # Rust builds don't hit "memory allocation failed".
-            ulimit -d "$(ulimit -Hd)" 2>/dev/null || true
-            cargo build --locked --release
-
-      - name: Packaging final binary
-        shell: bash
-        run: |
-          cd target/release
-          tar czvf piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-openbsd.tar.gz piratebay
-          shasum -a 512 piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-openbsd.tar.gz > piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-openbsd.tar.gz.sha512
-
-      - name: Releasing assets
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ env.RELEASE_VERSION }}
-          files: |
-            target/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-openbsd.tar.gz
-            target/release/piratebay_${{ env.RELEASE_VERSION }}_x86_64-unknown-openbsd.tar.gz.sha512
+            piratebay_${{ env.RELEASE_VERSION }}_${{ matrix.triple }}.tar.gz
+            piratebay_${{ env.RELEASE_VERSION }}_${{ matrix.triple }}.tar.gz.sha512
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
