@@ -60,7 +60,19 @@ PirateBay helps you search **and download** torrents right from the terminal —
 
 # Installation
 
-Simply run:
+### Install script (Linux, macOS, *BSD)
+
+Download the latest prebuilt binary with `curl` and `bash`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tsirysndr/piratebay/main/install.sh | bash
+```
+
+It auto-detects your OS/arch, verifies the checksum, and installs to
+`/usr/local/bin` (falling back to `~/.local/bin`). Override with
+`PIRATEBAY_VERSION` or `PIRATEBAY_INSTALL`.
+
+### Cargo
 
 ```bash
 $ cargo install piratebay
