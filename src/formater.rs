@@ -68,8 +68,8 @@ pub fn format_result(result: TorrentInfo, json: bool) {
         result.magnet.unwrap().green()
     );
 
-    if result.descr.is_some() {
-        println!("\n{}", result.descr.unwrap().to_string());
+    if let Some(descr) = result.descr {
+        println!("\n{descr}");
     }
 }
 
@@ -80,13 +80,13 @@ fn format_date(s: &str) -> String {
     let timestamp = s.parse::<i64>().unwrap();
     let datetime: DateTime<Utc> = DateTime::from_timestamp(timestamp, 0).unwrap();
     let date = datetime.format("%Y-%m-%d");
-    return format!("{}", date);
+    format!("{date}")
 }
 
 fn format_date_i64(timestamp: i64) -> String {
     let datetime: DateTime<Utc> = DateTime::from_timestamp(timestamp, 0).unwrap();
     let date = datetime.format("%Y-%m-%d");
-    return format!("{}", date);
+    format!("{date}")
 }
 
 fn format_size(s: &str) -> String {
@@ -94,5 +94,5 @@ fn format_size(s: &str) -> String {
         return s.to_string();
     }
     let size = s.parse::<u64>().unwrap_or(0);
-    return size.human_count_bytes().to_string();
+    size.human_count_bytes().to_string()
 }

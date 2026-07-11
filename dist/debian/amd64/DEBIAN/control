@@ -1,0 +1,7 @@
+Package: piratebay
+Version: 0.3.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: Tsiry Sandratraina <tsiry.sndr@rocksky.app>
+Description: Search and download torrents from The Pirate Bay right from your terminal 🏴‍☠️
