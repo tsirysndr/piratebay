@@ -2,7 +2,7 @@
   description = "piratebay - A command-line tool written in Rust to search for torrents on piratebay ✨";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
     crane.url = "github:ipetkov/crane";
 

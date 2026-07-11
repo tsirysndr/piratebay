@@ -19,4 +19,6 @@ target/
 
 .vscode
 
+result/
+
 # End of https://www.toptal.com/developers/gitignore/api/rust
