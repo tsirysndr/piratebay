@@ -28,10 +28,10 @@
 </p>
 
 PirateBay CLI helps you search **and download** torrents right from the terminal — pure Rust, async (tokio), no native C dependencies.
-  <img src="https://vhs.charm.sh/vhs-6sDgMICizW9RTfFPPnaoed.gif" alt="Made with VHS">
-  <a href="https://vhs.charm.sh">
-    <img src="https://stuff.charm.sh/vhs/badge.svg">
-  </a>
+
+<a href="https://pocketenv.io/new?repo=tangled:tsiry-sandratraina.com/piratebay" target="_blank"><img src="https://pocketenv.io/open-in-pocketenv.svg" alt="Open in Pocketenv" /></a>
+
+  <img src="preview.png" alt="PirateBay TUI preview">
 
 # Features
 
