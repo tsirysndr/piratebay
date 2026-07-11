@@ -70,6 +70,105 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set package arch
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          echo "PKG_ARCH=amd64" >> "$GITHUB_ENV"
+          echo "RPM_TARGET=x86_64" >> "$GITHUB_ENV"
+
+      - name: Install rpmbuild
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Build .deb
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_no_v="${RELEASE_VERSION#v}"
+          pkg_root="dist/debian/${PKG_ARCH}"
+          mkdir -p "$pkg_root/usr/bin"
+          install -m 0755 target/x86_64-unknown-linux-gnu/release/piratebay "$pkg_root/usr/bin/piratebay"
+          sed -i "s/^Version: .*/Version: ${version_no_v}/" "$pkg_root/DEBIAN/control"
+          dpkg-deb --build --root-owner-group "$pkg_root" "dist/piratebay_${version_no_v}_${PKG_ARCH}.deb"
+
+      - name: Build .rpm
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_no_v="${RELEASE_VERSION#v}"
+          src_root="dist/rpm/${PKG_ARCH}"
+          mkdir -p "${src_root}/usr/bin"
+          install -m 0755 target/x86_64-unknown-linux-gnu/release/piratebay "${src_root}/usr/bin/piratebay"
+          sed -i "s/^Version:        .*/Version:        ${version_no_v}/" "${src_root}/piratebay.spec"
+
+          rpm_top="$(pwd)/dist/rpmbuild"
+          mkdir -p "${rpm_top}"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+          cp -r "${src_root}" "${rpm_top}/SOURCES/${PKG_ARCH}"
+          rpmbuild --define "_topdir ${rpm_top}" \
+                   --define "_sourcedir ${rpm_top}/SOURCES" \
+                   --target "${RPM_TARGET}" \
+                   -bb "${src_root}/piratebay.spec"
+          find "${rpm_top}/RPMS" -name '*.rpm' -exec mv {} dist/ \;
+
+      - name: Checksum packages
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          for f in *.deb *.rpm; do
+            [ -e "$f" ] || continue
+            shasum -a 512 "$f" > "$f.sha512"
+          done
+          ls -lh
+
+      - name: Upload package assets
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_VERSION }}
+          files: |
+            dist/*.deb
+            dist/*.deb.sha512
+            dist/*.rpm
+            dist/*.rpm.sha512
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check Gemfury secrets
+        id: gemfury
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        env:
+          FURY_TOKEN: ${{ secrets.FURY_TOKEN }}
+          FURY_ACCOUNT: ${{ secrets.FURY_ACCOUNT }}
+        run: |
+          if [ -n "$FURY_TOKEN" ] && [ -n "$FURY_ACCOUNT" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Gemfury secrets not set; skipping push"
+          fi
+
+      - name: Push .deb and .rpm to Gemfury
+        if: matrix.target == 'x86_64-unknown-linux-musl' && steps.gemfury.outputs.available == 'true'
+        env:
+          FURY_TOKEN: ${{ secrets.FURY_TOKEN }}
+          FURY_ACCOUNT: ${{ secrets.FURY_ACCOUNT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for pkg in dist/*.deb dist/*.rpm; do
+            echo "Pushing $pkg to Gemfury (${FURY_ACCOUNT})"
+            curl -fsS -F package=@"${pkg}" \
+              "https://${FURY_TOKEN}@push.fury.io/${FURY_ACCOUNT}/"
+            echo
+          done
+
   release-linux-aarch64:
     name: release aarch64-unknown-linux-gnu
     runs-on: ubuntu-24.04-arm
@@ -105,3 +204,66 @@ jobs:
             target/aarch64-unknown-linux-gnu/release/piratebay_${{ env.RELEASE_VERSION }}_aarch64-unknown-linux-gnu.tar.gz.sha512
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set package arch
+        run: echo "PKG_ARCH=arm64" >> "$GITHUB_ENV"
+
+      - name: Build .deb
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_no_v="${RELEASE_VERSION#v}"
+          pkg_root="dist/debian/${PKG_ARCH}"
+          mkdir -p "$pkg_root/usr/bin"
+          install -m 0755 target/aarch64-unknown-linux-gnu/release/piratebay "$pkg_root/usr/bin/piratebay"
+          sed -i "s/^Version: .*/Version: ${version_no_v}/" "$pkg_root/DEBIAN/control"
+          dpkg-deb --build --root-owner-group "$pkg_root" "dist/piratebay_${version_no_v}_${PKG_ARCH}.deb"
+
+      - name: Checksum packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          for f in *.deb; do
+            [ -e "$f" ] || continue
+            shasum -a 512 "$f" > "$f.sha512"
+          done
+
+      - name: Upload package assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_VERSION }}
+          files: |
+            dist/*.deb
+            dist/*.deb.sha512
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check Gemfury secrets
+        id: gemfury
+        env:
+          FURY_TOKEN: ${{ secrets.FURY_TOKEN }}
+          FURY_ACCOUNT: ${{ secrets.FURY_ACCOUNT }}
+        run: |
+          if [ -n "$FURY_TOKEN" ] && [ -n "$FURY_ACCOUNT" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Gemfury secrets not set; skipping push"
+          fi
+
+      - name: Push .deb to Gemfury
+        if: steps.gemfury.outputs.available == 'true'
+        env:
+          FURY_TOKEN: ${{ secrets.FURY_TOKEN }}
+          FURY_ACCOUNT: ${{ secrets.FURY_ACCOUNT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for pkg in dist/*.deb; do
+            echo "Pushing $pkg to Gemfury (${FURY_ACCOUNT})"
+            curl -fsS -F package=@"${pkg}" \
+              "https://${FURY_TOKEN}@push.fury.io/${FURY_ACCOUNT}/"
+            echo
+          done

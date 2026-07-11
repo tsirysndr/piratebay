@@ -35,7 +35,7 @@ fn cli() -> Command {
     const VERSION: &str = env!("CARGO_PKG_VERSION");
     Command::new("piratebay")
         .version(VERSION)
-        .author("Tsiry Sandratraina <tsiry.sndr@aol.com>")
+        .author("Tsiry Sandratraina <tsiry.sndr@rocksky.app>")
         .styles(theme_styles())
         .about(
             r#"

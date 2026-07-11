@@ -69,10 +69,36 @@ Simply run:
 $ cargo install piratebay
 ```
 
-### macOS
+### macOS/Linux
 
 ```bash
 brew install tsirysndr/tap/piratebay
+```
+
+### Ubuntu/Debian
+
+```bash
+echo "deb [trusted=yes] https://apt.fury.io/tsiry/ /" | sudo tee /etc/apt/sources.list.d/fury.list
+sudo apt-get update
+sudo apt-get install piratebay
+```
+
+### Fedora
+
+Add the following to `/etc/yum.repos.d/fury.repo`:
+
+```
+[fury]
+name=Gemfury Private Repo
+baseurl=https://yum.fury.io/tsiry/
+enabled=1
+gpgcheck=0
+```
+
+Then run:
+
+```bash
+dnf install piratebay
 ```
 
 ## Arch Linux
