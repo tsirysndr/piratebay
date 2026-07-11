@@ -121,6 +121,9 @@ jobs:
           prepare: |
             pkg_add -I rust
           run: |
+            # Packages install to /usr/local/bin, which isn't on the default
+            # PATH of the VM's sh — add it so cargo/rustc are found.
+            export PATH="/usr/local/bin:$PATH"
             # OpenBSD's default class caps datasize; raise it so large
             # Rust builds don't hit "memory allocation failed".
             ulimit -d "$(ulimit -Hd)" 2>/dev/null || true
