@@ -216,7 +216,7 @@ fn render_results(f: &mut Frame, app: &mut App, area: Rect) {
         };
         Row::new(vec![
             Cell::from(Line::from(marker)),
-            Cell::from(t.source.clone()).style(Style::default().fg(LINK)),
+            Cell::from(source_tag(&t.source)).style(Style::default().fg(LINK)),
             Cell::from(format!("{icon} {label}")).style(Style::default().fg(MUTED)),
             Cell::from(t.name.clone()).style(Style::default().fg(SKY)),
             Cell::from(human_bytes(t.size)).style(Style::default().fg(SECONDARY)),
@@ -229,7 +229,7 @@ fn render_results(f: &mut Frame, app: &mut App, area: Rect) {
 
     let widths = [
         Constraint::Length(1),
-        Constraint::Length(4),
+        Constraint::Length(5),
         Constraint::Length(10),
         Constraint::Min(20),
         Constraint::Length(10),
@@ -518,6 +518,16 @@ fn human_date(ts: Option<i64>) -> String {
     ts.and_then(|t| DateTime::from_timestamp(t, 0))
         .map(|d| d.format("%Y-%m-%d").to_string())
         .unwrap_or_else(|| "—".into())
+}
+
+/// Compact label for the narrow "Src" column.
+fn source_tag(id: &str) -> String {
+    match id {
+        "bitsearch" => "bits".into(),
+        "limetorrents" => "lime".into(),
+        "torrentdownload" => "tdl".into(),
+        _ => id.chars().take(5).collect(),
+    }
 }
 
 fn or_dash(v: Option<String>) -> String {

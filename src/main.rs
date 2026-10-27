@@ -49,7 +49,7 @@ fn cli() -> Command {
                                          __/ |
                                         |___/
 
-Search and download torrents from The Pirate Bay, Nyaa and more
+Search and download torrents from The Pirate Bay, Nyaa, Bitsearch, LimeTorrents and TorrentDownload
 "#,
         )
         .subcommand(
@@ -165,7 +165,7 @@ Search and download torrents from The Pirate Bay, Nyaa and more
             Arg::new("source")
                 .short('S')
                 .long("source")
-                .help("Comma-separated sources to query: tpb, nyaa, or all")
+                .help("Comma-separated sources to query: tpb, nyaa, bitsearch, limetorrents, torrentdownload, or all")
                 .value_name("SOURCES")
                 .default_value("all")
                 .global(true),

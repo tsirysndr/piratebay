@@ -6,17 +6,27 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 
+use reqwest::{Client, Response, StatusCode};
+
 use crate::pirateclient::{ApiError, PirateClient};
 
+pub mod bitsearch;
+pub mod limetorrents;
 pub mod nyaa;
+mod rss;
+pub mod torrentdownload;
 pub mod tpb;
 
+pub use bitsearch::BitsearchSource;
+pub use limetorrents::LimeTorrentsSource;
 pub use nyaa::NyaaSource;
+pub use torrentdownload::TorrentDownloadSource;
 pub use tpb::TpbSource;
 
 /// Browse scopes shared by every source. Each source maps these onto its own
@@ -96,7 +106,61 @@ pub trait Source: Send + Sync {
 
 /// Every available source, in display order.
 pub fn all() -> Vec<Arc<dyn Source>> {
-    vec![Arc::new(TpbSource::new()), Arc::new(NyaaSource::new())]
+    vec![
+        Arc::new(TpbSource::new()),
+        Arc::new(NyaaSource::new()),
+        Arc::new(BitsearchSource::new()),
+        Arc::new(LimeTorrentsSource::new()),
+        Arc::new(TorrentDownloadSource::new()),
+    ]
+}
+
+// --- helpers shared by source implementations -------------------------------
+
+/// HTTP client used by the sources.
+pub(crate) fn http_client() -> Client {
+    Client::builder()
+        .user_agent("piratebay-cli")
+        .timeout(Duration::from_secs(60))
+        .build()
+        .expect("reqwest client")
+}
+
+/// Map rate limiting to [`ApiError::RateLimited`] and other HTTP errors to
+/// [`ApiError::Reqwest`].
+pub(crate) fn check_status(res: Response) -> Result<Response, ApiError> {
+    if res.status() == StatusCode::TOO_MANY_REQUESTS {
+        return Err(ApiError::RateLimited);
+    }
+    Ok(res.error_for_status()?)
+}
+
+/// A site's base URL: `env` overrides `default`, so users can point a source
+/// at a mirror when its domain moves. Trailing slashes are trimmed.
+pub(crate) fn base_url(env: &str, default: &str) -> String {
+    std::env::var(env)
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| default.to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+/// Parse human sizes such as `1.4 GiB`, `697.57 MB` or `512 Bytes` into bytes.
+/// Torrent sites use `MB`/`GB` for binary multiples, so both spellings are
+/// treated as powers of 1024.
+pub(crate) fn parse_size(s: &str) -> Option<u64> {
+    let (num, unit) = s.trim().split_once(' ')?;
+    let num: f64 = num.replace(',', "").parse().ok()?;
+    let exp = match unit.trim() {
+        "B" | "Bytes" | "bytes" => 0,
+        "KB" | "KiB" | "kB" => 1,
+        "MB" | "MiB" => 2,
+        "GB" | "GiB" => 3,
+        "TB" | "TiB" => 4,
+        _ => return None,
+    };
+    Some((num * 1024f64.powi(exp)) as u64)
 }
 
 /// Resolve a comma-separated list of source ids, or `all` for every source.
@@ -310,9 +374,37 @@ mod tests {
     }
 
     #[test]
+    fn parses_sizes() {
+        assert_eq!(parse_size("512 Bytes"), Some(512));
+        assert_eq!(parse_size("1.5 KiB"), Some(1536));
+        assert_eq!(parse_size("2 GiB"), Some(2 << 30));
+        assert_eq!(parse_size("1 MB"), Some(1 << 20));
+        assert_eq!(parse_size("1,024 KB"), Some(1 << 20));
+        assert_eq!(parse_size("garbage"), None);
+        assert_eq!(parse_size("3 parsecs"), None);
+    }
+
+    #[test]
+    fn base_url_trims_trailing_slash() {
+        assert_eq!(
+            base_url("PIRATEBAY_TEST_UNSET_URL", "https://example.org/"),
+            "https://example.org"
+        );
+    }
+
+    #[test]
     fn from_ids_resolves_lists() {
         let ids = |spec| from_ids(spec).map(|v| v.iter().map(|s| s.id()).collect::<Vec<_>>());
-        assert_eq!(ids("all").unwrap(), vec!["tpb", "nyaa"]);
+        assert_eq!(
+            ids("all").unwrap(),
+            vec![
+                "tpb",
+                "nyaa",
+                "bitsearch",
+                "limetorrents",
+                "torrentdownload"
+            ]
+        );
         assert_eq!(ids("nyaa, tpb,nyaa").unwrap(), vec!["nyaa", "tpb"]);
         assert!(ids("bogus").unwrap_err().contains("unknown source"));
         assert!(ids("").is_err());
