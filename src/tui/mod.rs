@@ -11,7 +11,7 @@ use librqbit::{Session, SessionOptions};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use tokio::sync::mpsc::{self, UnboundedSender};
 
-use crate::pirateclient::PirateClient;
+use crate::sources::{Source, TpbSource};
 
 use app::{App, Category, InputMode, Msg};
 
@@ -30,12 +30,12 @@ pub async fn run(output_dir: PathBuf) -> Result<()> {
     };
     let session: Option<Arc<Session>> = Session::new_with_opts(output_dir.clone(), opts).await.ok();
 
-    let client = Arc::new(PirateClient::new());
+    let source: Arc<dyn Source> = Arc::new(TpbSource::new());
     let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
 
     spawn_input_thread(tx.clone());
 
-    let mut app = App::new(client, session, output_dir, tx);
+    let mut app = App::new(source, session, output_dir, tx);
 
     let mut terminal = ratatui::init();
     let result = async {

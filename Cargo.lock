@@ -2196,6 +2196,7 @@ version = "0.4.1"
 dependencies = [
  "anstyle",
  "anyhow",
+ "async-trait",
  "chrono",
  "clap",
  "colored_json",

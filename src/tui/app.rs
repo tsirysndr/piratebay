@@ -7,13 +7,12 @@ use ratatui::crossterm::event::Event;
 use ratatui::widgets::TableState;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::pirateclient::PirateClient;
-use crate::types::Torrent;
+use crate::sources::{SearchResult, Source, SourceCategory};
 
 use super::download::spawn_download;
 
-/// Categories mirror The Pirate Bay's top navigation. `All` is the free-text
-/// search scope; the rest map onto apibay's numeric category listings.
+/// Tabs in the header. `All` is the free-text search scope; the rest browse a
+/// [`SourceCategory`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Category {
     All,
@@ -52,23 +51,24 @@ impl Category {
         Category::ORDER.iter().position(|c| c == self).unwrap_or(0)
     }
 
+    /// The browse scope behind this tab, or `None` for free-text search.
+    pub fn source_category(&self) -> Option<SourceCategory> {
+        match self {
+            Category::All => None,
+            Category::Audio => Some(SourceCategory::Audio),
+            Category::Video => Some(SourceCategory::Video),
+            Category::Applications => Some(SourceCategory::Applications),
+            Category::Games => Some(SourceCategory::Games),
+            Category::Porn => Some(SourceCategory::Porn),
+            Category::Other => Some(SourceCategory::Other),
+        }
+    }
+
     /// Category `delta` steps away, wrapping around the tab bar.
     pub fn cycle(self, delta: isize) -> Category {
         let len = Self::ORDER.len() as isize;
         let idx = (self.index() as isize + delta).rem_euclid(len) as usize;
         Self::ORDER[idx]
-    }
-}
-
-/// Map a torrent's numeric category code to a short icon + label for display.
-pub fn category_label(code: &str) -> (&'static str, &'static str) {
-    match code.chars().next() {
-        Some('1') => ("♪", "Audio"),
-        Some('2') => ("▶", "Video"),
-        Some('3') => ("⚙", "Apps"),
-        Some('4') => ("🎮", "Games"),
-        Some('5') => ("♥", "XXX"),
-        _ => ("◈", "Other"),
     }
 }
 
@@ -80,7 +80,7 @@ pub enum InputMode {
     Editing,
 }
 
-/// A download in flight, keyed by torrent id in [`App::downloads`].
+/// A download in flight, keyed by info hash in [`App::downloads`].
 pub struct Download {
     pub name: String,
     pub downloaded: u64,
@@ -95,7 +95,7 @@ pub struct Download {
 pub enum Msg {
     Term(Event),
     /// Results for request `gen` in `category`. Stale gens are dropped.
-    Results(u64, Category, Result<Vec<Torrent>, String>),
+    Results(u64, Category, Result<Vec<SearchResult>, String>),
     DlProgress {
         id: String,
         name: String,
@@ -111,7 +111,7 @@ pub enum Msg {
 }
 
 pub struct App {
-    pub client: Arc<PirateClient>,
+    pub source: Arc<dyn Source>,
     pub session: Option<Arc<Session>>,
     pub output_dir: PathBuf,
     pub tx: UnboundedSender<Msg>,
@@ -122,7 +122,7 @@ pub struct App {
     pub input_mode: InputMode,
     pub category: Category,
 
-    pub results: Vec<Torrent>,
+    pub results: Vec<SearchResult>,
     pub table_state: TableState,
     pub loading: bool,
     pub status: String,
@@ -138,13 +138,13 @@ pub struct App {
 
 impl App {
     pub fn new(
-        client: Arc<PirateClient>,
+        source: Arc<dyn Source>,
         session: Option<Arc<Session>>,
         output_dir: PathBuf,
         tx: UnboundedSender<Msg>,
     ) -> Self {
         Self {
-            client,
+            source,
             session,
             output_dir,
             tx,
@@ -222,7 +222,7 @@ impl App {
         self.cursor = self.char_count();
     }
 
-    pub fn selected(&self) -> Option<&Torrent> {
+    pub fn selected(&self) -> Option<&SearchResult> {
         self.table_state
             .selected()
             .and_then(|i| self.results.get(i))
@@ -269,7 +269,7 @@ impl App {
         self.gen += 1;
         let gen = self.gen;
         let category = self.category;
-        let client = self.client.clone();
+        let source = self.source.clone();
         let tx = self.tx.clone();
         let query = self.query.trim().to_string();
 
@@ -287,38 +287,28 @@ impl App {
         };
 
         tokio::spawn(async move {
-            let res = match category {
-                Category::All => client.search(&urlencoding::encode(&query)).await,
-                Category::Audio => client.list_audio().await,
-                Category::Video => client.list_video().await,
-                Category::Applications => client.list_applications().await,
-                Category::Games => client.list_games().await,
-                Category::Porn => client.list_porn().await,
-                Category::Other => client.list_other().await,
+            let res = match category.source_category() {
+                None => source.search(&query).await,
+                Some(c) => source.browse(c).await,
             };
             let res = res.map_err(|e| e.to_string());
             let _ = tx.send(Msg::Results(gen, category, res));
         });
     }
 
-    /// Apply a settled fetch result, dropping empty/sentinel rows apibay
-    /// returns when there are no matches.
+    /// Apply a settled fetch result.
     pub fn apply_results(
         &mut self,
         gen: u64,
         category: Category,
-        res: Result<Vec<Torrent>, String>,
+        res: Result<Vec<SearchResult>, String>,
     ) {
         if gen != self.gen {
             return; // stale response
         }
         self.loading = false;
         match res {
-            Ok(mut torrents) => {
-                // apibay signals "no results" with a single id=0 sentinel row.
-                if torrents.len() == 1 && torrents[0].id == "0" {
-                    torrents.clear();
-                }
+            Ok(torrents) => {
                 self.results = torrents;
                 if self.results.is_empty() {
                     self.table_state.select(None);
@@ -359,9 +349,9 @@ impl App {
             self.status = "Nothing selected to download".into();
             return;
         };
-        let id = t.id.clone();
+        let id = t.info_hash.clone();
         let name = t.name.clone();
-        let info_hash = t.info_hash.clone();
+        let magnet = t.magnet();
 
         if self.downloads.contains_key(&id) {
             self.status = format!("Already downloading: {name}");
@@ -372,7 +362,6 @@ impl App {
             return;
         };
 
-        let magnet = PirateClient::magnet_for(&info_hash, &name);
         self.downloads.insert(
             id.clone(),
             Download {
@@ -394,7 +383,7 @@ impl App {
             self.status = "Nothing selected to copy".into();
             return;
         };
-        let magnet = PirateClient::magnet_for(&t.info_hash, &t.name);
+        let magnet = t.magnet();
         self.status = match super::clipboard::copy(&magnet) {
             Ok(()) => "Magnet link copied to clipboard".into(),
             Err(e) => format!("Copy failed: {e}"),
@@ -442,46 +431,46 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sources::TpbSource;
     use tokio::sync::mpsc;
 
     fn test_app() -> App {
         let (tx, _rx) = mpsc::unbounded_channel();
         App::new(
-            Arc::new(PirateClient::new()),
+            Arc::new(TpbSource::new()),
             None,
             PathBuf::from("/tmp/piratebay-test"),
             tx,
         )
     }
 
-    fn torrent(id: &str, name: &str, category: &str) -> Torrent {
-        Torrent {
-            added: "1613347200".into(),
-            category: category.into(),
-            descr: None,
-            download_count: None,
+    fn torrent(id: &str, name: &str) -> SearchResult {
+        SearchResult {
+            source: "tpb".into(),
             id: id.into(),
-            info_hash: "0123456789ABCDEF0123456789ABCDEF01234567".into(),
-            leechers: "1".into(),
             name: name.into(),
+            info_hash: format!("{id:0>40}"),
+            size: 1024,
+            seeders: 10,
+            leechers: 1,
+            added: Some(1613347200),
+            category: SourceCategory::Video,
+            uploader: Some("tester".into()),
             num_files: None,
-            seeders: "10".into(),
-            size: "1024".into(),
-            status: "vip".into(),
-            username: "tester".into(),
+            download_count: None,
+            status: Some("vip".into()),
+            descr: None,
             magnet: None,
         }
     }
 
     #[test]
-    fn category_labels_map_by_leading_digit() {
-        assert_eq!(category_label("101"), ("♪", "Audio"));
-        assert_eq!(category_label("207"), ("▶", "Video"));
-        assert_eq!(category_label("399"), ("⚙", "Apps"));
-        assert_eq!(category_label("400"), ("🎮", "Games"));
-        assert_eq!(category_label("505"), ("♥", "XXX"));
-        assert_eq!(category_label("605"), ("◈", "Other"));
-        assert_eq!(category_label(""), ("◈", "Other"));
+    fn category_tabs_map_to_source_categories() {
+        assert_eq!(Category::All.source_category(), None);
+        assert_eq!(
+            Category::Games.source_category(),
+            Some(SourceCategory::Games)
+        );
     }
 
     #[test]
@@ -496,7 +485,7 @@ mod tests {
     #[test]
     fn apply_results_populates_and_selects_first() {
         let mut app = test_app();
-        let rows = vec![torrent("1", "First", "200"), torrent("2", "Second", "200")];
+        let rows = vec![torrent("1", "First"), torrent("2", "Second")];
         app.apply_results(app.gen, Category::Video, Ok(rows));
         assert_eq!(app.results.len(), 2);
         assert_eq!(app.table_state.selected(), Some(0));
@@ -505,14 +494,9 @@ mod tests {
     }
 
     #[test]
-    fn apply_results_drops_no_results_sentinel() {
+    fn apply_results_reports_empty() {
         let mut app = test_app();
-        // apibay returns a single id=0 row to mean "nothing found".
-        app.apply_results(
-            app.gen,
-            Category::All,
-            Ok(vec![torrent("0", "No results", "0")]),
-        );
+        app.apply_results(app.gen, Category::All, Ok(vec![]));
         assert!(app.results.is_empty());
         assert_eq!(app.table_state.selected(), None);
         assert_eq!(app.status, "No results found");
@@ -522,7 +506,7 @@ mod tests {
     fn apply_results_ignores_stale_generation() {
         let mut app = test_app();
         app.gen = 5;
-        app.apply_results(4, Category::All, Ok(vec![torrent("1", "Late", "200")]));
+        app.apply_results(4, Category::All, Ok(vec![torrent("1", "Late")]));
         assert!(app.results.is_empty());
     }
 
@@ -537,9 +521,7 @@ mod tests {
     #[test]
     fn selection_stays_within_bounds() {
         let mut app = test_app();
-        let rows = (0..3)
-            .map(|i| torrent(&i.to_string(), "T", "200"))
-            .collect();
+        let rows = (0..3).map(|i| torrent(&i.to_string(), "T")).collect();
         app.apply_results(app.gen, Category::Video, Ok(rows));
 
         app.select_next(); // 0 -> 1
@@ -560,11 +542,7 @@ mod tests {
     #[test]
     fn download_without_session_reports_status() {
         let mut app = test_app();
-        app.apply_results(
-            app.gen,
-            Category::Video,
-            Ok(vec![torrent("1", "Movie", "200")]),
-        );
+        app.apply_results(app.gen, Category::Video, Ok(vec![torrent("1", "Movie")]));
         app.download_selected();
         // No session was created, so nothing is enqueued.
         assert!(app.downloads.is_empty());

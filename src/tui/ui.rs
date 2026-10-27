@@ -8,9 +8,7 @@ use ratatui::widgets::{
 };
 use ratatui::Frame;
 
-use crate::pirateclient::PirateClient;
-
-use super::app::{category_label, App, Category, InputMode};
+use super::app::{App, Category, InputMode};
 
 // Dark-canvas palette: teal primary, cyan secondary, purple accent, green
 // highlight, orange link, sky blue, red error, light-gray muted. Borders keep
@@ -197,8 +195,8 @@ fn render_results(f: &mut Frame, app: &mut App, area: Rect) {
     .bottom_margin(1);
 
     let rows = app.results.iter().map(|t| {
-        let (icon, label) = category_label(&t.category);
-        let dl = app.downloads.get(&t.id);
+        let (icon, label) = t.category.label();
+        let dl = app.downloads.get(&t.info_hash);
         let marker = match dl {
             Some(d) if d.error.is_some() => Span::styled("✗", Style::default().fg(ERROR)),
             Some(d) if d.done => Span::styled("✓", Style::default().fg(HIGHLIGHT)),
@@ -212,11 +210,11 @@ fn render_results(f: &mut Frame, app: &mut App, area: Rect) {
             Cell::from(Line::from(marker)),
             Cell::from(format!("{icon} {label}")).style(Style::default().fg(MUTED)),
             Cell::from(t.name.clone()).style(Style::default().fg(SKY)),
-            Cell::from(human_size(&t.size)).style(Style::default().fg(SECONDARY)),
-            Cell::from(human_date(&t.added)).style(Style::default().fg(MUTED)),
-            Cell::from(t.seeders.clone()).style(Style::default().fg(HIGHLIGHT)),
-            Cell::from(t.leechers.clone()).style(Style::default().fg(ERROR)),
-            Cell::from(t.username.clone()).style(Style::default().fg(ACCENT)),
+            Cell::from(human_bytes(t.size)).style(Style::default().fg(SECONDARY)),
+            Cell::from(human_date(t.added)).style(Style::default().fg(MUTED)),
+            Cell::from(t.seeders.to_string()).style(Style::default().fg(HIGHLIGHT)),
+            Cell::from(t.leechers.to_string()).style(Style::default().fg(ERROR)),
+            Cell::from(t.uploader.clone().unwrap_or_default()).style(Style::default().fg(ACCENT)),
         ])
     });
 
@@ -354,8 +352,8 @@ fn render_detail(f: &mut Frame, app: &App) {
     let area = centered_rect(72, 74, f.area());
     f.render_widget(Clear, area);
 
-    let (icon, label) = category_label(&t.category);
-    let magnet = PirateClient::magnet_for(&t.info_hash, &t.name);
+    let (icon, label) = t.category.label();
+    let magnet = t.magnet();
 
     let field = |k: &str, v: String, color: Color| -> Line<'static> {
         Line::from(vec![
@@ -370,20 +368,16 @@ fn render_detail(f: &mut Frame, app: &App) {
             Style::default().fg(SKY).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        field("Category", format!("{icon} {label} ({})", t.category), TEXT),
-        field("Size", human_size(&t.size), SECONDARY),
-        field("Seeders", t.seeders.clone(), HIGHLIGHT),
-        field("Leechers", t.leechers.clone(), ERROR),
-        field("Uploaded", human_date(&t.added), MUTED),
-        field("Uploader", t.username.clone(), ACCENT),
-        field(
-            "Files",
-            t.num_files.clone().unwrap_or_else(|| "—".into()),
-            MUTED,
-        ),
+        field("Category", format!("{icon} {label}"), TEXT),
+        field("Size", human_bytes(t.size), SECONDARY),
+        field("Seeders", t.seeders.to_string(), HIGHLIGHT),
+        field("Leechers", t.leechers.to_string(), ERROR),
+        field("Uploaded", human_date(t.added), MUTED),
+        field("Uploader", or_dash(t.uploader.clone()), ACCENT),
+        field("Files", or_dash(t.num_files.map(|n| n.to_string())), MUTED),
         field(
             "Downloads",
-            t.download_count.clone().unwrap_or_else(|| "—".into()),
+            or_dash(t.download_count.map(|n| n.to_string())),
             MUTED,
         ),
         field("Info hash", t.info_hash.clone(), MUTED),
@@ -503,22 +497,18 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         .split(vertical[1])[1]
 }
 
-fn human_size(s: &str) -> String {
-    s.parse::<u64>()
-        .map(human_bytes)
-        .unwrap_or_else(|_| s.to_string())
-}
-
 fn human_bytes(b: u64) -> String {
     b.human_count_bytes().to_string()
 }
 
-fn human_date(s: &str) -> String {
-    s.parse::<i64>()
-        .ok()
-        .and_then(|t| DateTime::from_timestamp(t, 0))
+fn human_date(ts: Option<i64>) -> String {
+    ts.and_then(|t| DateTime::from_timestamp(t, 0))
         .map(|d| d.format("%Y-%m-%d").to_string())
         .unwrap_or_else(|| "—".into())
+}
+
+fn or_dash(v: Option<String>) -> String {
+    v.unwrap_or_else(|| "—".into())
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -535,20 +525,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn human_size_formats_bytes() {
+    fn human_bytes_formats_sizes() {
         // human-repr uses SI units (1 kB = 1000 B).
-        assert_eq!(human_size("1024"), "1kB");
-        assert_eq!(human_size("0"), "0B");
-        assert_eq!(human_size("2500000"), "2.5MB");
-        // Non-numeric input is passed through unchanged.
-        assert_eq!(human_size("size"), "size");
+        assert_eq!(human_bytes(1024), "1kB");
+        assert_eq!(human_bytes(0), "0B");
+        assert_eq!(human_bytes(2500000), "2.5MB");
     }
 
     #[test]
     fn human_date_formats_unix_timestamp() {
-        assert_eq!(human_date("1613347200"), "2021-02-15");
-        // Unparseable input yields an em dash placeholder.
-        assert_eq!(human_date("added"), "—");
+        assert_eq!(human_date(Some(1613347200)), "2021-02-15");
+        // A missing timestamp yields an em dash placeholder.
+        assert_eq!(human_date(None), "—");
     }
 
     #[test]

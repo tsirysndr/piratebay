@@ -6,9 +6,9 @@ use piratebay::{
     download::download,
     formater::{format_result, format_results},
     pirateclient::PirateClient,
+    sources::{Source, SourceCategory, TpbSource},
     tui,
 };
-use urlencoding::encode;
 
 // Shared palette: teal primary, cyan secondary, purple accent, green
 // highlight, orange link, sky blue, red error.
@@ -174,6 +174,7 @@ Search and download torrents from The Pirate Bay
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = PirateClient::new();
+    let source = TpbSource::new();
     let matches = cli().get_matches();
 
     let json = matches.get_flag("json");
@@ -192,8 +193,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(("search", sub_matches)) => {
             let json = json || sub_matches.get_flag("json");
-            let query = encode(sub_matches.get_one::<String>("query").unwrap());
-            format_results(client.search(&query).await?, json);
+            let query = sub_matches.get_one::<String>("query").unwrap();
+            format_results(source.search(query).await?, json);
         }
         Some(("info", sub_matches)) => {
             let json = json || sub_matches.get_flag("json");
@@ -211,23 +212,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(("category", sub_matches)) => {
             let json = json || sub_matches.get_flag("json");
-            if sub_matches.get_flag("audio") {
-                format_results(client.list_audio().await?, json);
-            }
-            if sub_matches.get_flag("video") {
-                format_results(client.list_video().await?, json);
-            }
-            if sub_matches.get_flag("applications") {
-                format_results(client.list_applications().await?, json);
-            }
-            if sub_matches.get_flag("games") {
-                format_results(client.list_games().await?, json);
-            }
-            if sub_matches.get_flag("porn") {
-                format_results(client.list_porn().await?, json);
-            }
-            if sub_matches.get_flag("other") {
-                format_results(client.list_other().await?, json);
+            let flags = [
+                ("audio", SourceCategory::Audio),
+                ("video", SourceCategory::Video),
+                ("applications", SourceCategory::Applications),
+                ("games", SourceCategory::Games),
+                ("porn", SourceCategory::Porn),
+                ("other", SourceCategory::Other),
+            ];
+            for (flag, category) in flags {
+                if sub_matches.get_flag(flag) {
+                    format_results(source.browse(category).await?, json);
+                }
             }
         }
         _ => unreachable!(),
