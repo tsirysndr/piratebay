@@ -11,12 +11,12 @@ use librqbit::{Session, SessionOptions};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use tokio::sync::mpsc::{self, UnboundedSender};
 
-use crate::sources::{Source, TpbSource};
+use crate::sources::Source;
 
 use app::{App, Category, InputMode, Msg};
 
 /// Launch the interactive TUI. `output_dir` is where downloads are written.
-pub async fn run(output_dir: PathBuf) -> Result<()> {
+pub async fn run(output_dir: PathBuf, sources: Vec<Arc<dyn Source>>) -> Result<()> {
     tokio::fs::create_dir_all(&output_dir).await.ok();
 
     // A shared torrent session powers every download started from the UI.
@@ -30,12 +30,11 @@ pub async fn run(output_dir: PathBuf) -> Result<()> {
     };
     let session: Option<Arc<Session>> = Session::new_with_opts(output_dir.clone(), opts).await.ok();
 
-    let source: Arc<dyn Source> = Arc::new(TpbSource::new());
     let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
 
     spawn_input_thread(tx.clone());
 
-    let mut app = App::new(source, session, output_dir, tx);
+    let mut app = App::new(sources, session, output_dir, tx);
 
     let mut terminal = ratatui::init();
     let result = async {
@@ -146,6 +145,7 @@ fn handle_term(app: &mut App, ev: Event) {
             KeyCode::Char('d') => app.download_selected(),
             KeyCode::Char('c') | KeyCode::Char('y') => app.copy_magnet(),
             KeyCode::Char('r') => app.fetch(),
+            KeyCode::Char('s') => app.cycle_source(),
             KeyCode::Enter => {
                 if app.selected().is_some() {
                     app.show_detail = true;

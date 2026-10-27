@@ -21,10 +21,11 @@ pub fn format_results(results: Vec<SearchResult>, json: bool) {
     }
     let mut builder = Builder::default();
     builder.set_columns([
-        "added", "id", "leechers", "name", "seeders", "size", "status", "username",
+        "source", "added", "id", "leechers", "name", "seeders", "size", "status", "username",
     ]);
     for r in results {
         builder.add_record([
+            r.source,
             r.added.map(format_date_i64).unwrap_or_default(),
             r.id,
             r.leechers.to_string(),

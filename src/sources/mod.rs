@@ -4,13 +4,19 @@
 //! [`SearchResult`], so the CLI and TUI can render and download results without
 //! knowing which site they came from.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use async_trait::async_trait;
+use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 
 use crate::pirateclient::{ApiError, PirateClient};
 
+pub mod nyaa;
 pub mod tpb;
 
+pub use nyaa::NyaaSource;
 pub use tpb::TpbSource;
 
 /// Browse scopes shared by every source. Each source maps these onto its own
@@ -86,4 +92,229 @@ pub trait Source: Send + Sync {
     async fn search(&self, query: &str) -> Result<Vec<SearchResult>, ApiError>;
     /// List the latest / top torrents in a category.
     async fn browse(&self, category: SourceCategory) -> Result<Vec<SearchResult>, ApiError>;
+}
+
+/// Every available source, in display order.
+pub fn all() -> Vec<Arc<dyn Source>> {
+    vec![Arc::new(TpbSource::new()), Arc::new(NyaaSource::new())]
+}
+
+/// Resolve a comma-separated list of source ids, or `all` for every source.
+pub fn from_ids(spec: &str) -> Result<Vec<Arc<dyn Source>>, String> {
+    let available = all();
+    let mut picked: Vec<Arc<dyn Source>> = Vec::new();
+    for id in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        if id == "all" {
+            return Ok(available);
+        }
+        let source = available.iter().find(|s| s.id() == id).ok_or_else(|| {
+            let ids: Vec<_> = available.iter().map(|s| s.id()).collect();
+            format!("unknown source '{id}' (available: all, {})", ids.join(", "))
+        })?;
+        if !picked.iter().any(|s| s.id() == id) {
+            picked.push(source.clone());
+        }
+    }
+    if picked.is_empty() {
+        return Err("no source selected".into());
+    }
+    Ok(picked)
+}
+
+/// Results merged from several sources, plus the sources that failed.
+#[derive(Debug)]
+pub struct Aggregate {
+    pub results: Vec<SearchResult>,
+    pub errors: Vec<(&'static str, ApiError)>,
+}
+
+/// Search every source concurrently; results are merged by [`merge`] and
+/// ranked by seeders.
+pub async fn search_all(sources: &[Arc<dyn Source>], query: &str) -> Result<Aggregate, ApiError> {
+    let batches = join_all(
+        sources
+            .iter()
+            .map(|s| async move { (s.id(), s.search(query).await) }),
+    );
+    merge(batches.await, |a, b| b.seeders.cmp(&a.seeders))
+}
+
+/// Browse a category on every source concurrently; newest first.
+pub async fn browse_all(
+    sources: &[Arc<dyn Source>],
+    category: SourceCategory,
+) -> Result<Aggregate, ApiError> {
+    let batches = join_all(
+        sources
+            .iter()
+            .map(|s| async move { (s.id(), s.browse(category).await) }),
+    );
+    merge(batches.await, |a, b| b.added.cmp(&a.added))
+}
+
+/// Combine per-source batches: torrents seen on several sources (same info
+/// hash) are kept once, with the highest peer counts. A single batch keeps the
+/// source's own ordering; several are sorted with `order`.
+///
+/// Sources that don't support the request are skipped; failures are reported
+/// in [`Aggregate::errors`] unless every source failed, in which case the
+/// first error is returned.
+fn merge(
+    batches: Vec<(&'static str, Result<Vec<SearchResult>, ApiError>)>,
+    order: impl Fn(&SearchResult, &SearchResult) -> std::cmp::Ordering,
+) -> Result<Aggregate, ApiError> {
+    let mut results: Vec<SearchResult> = Vec::new();
+    let mut by_hash: HashMap<String, usize> = HashMap::new();
+    let mut errors = Vec::new();
+    let mut answered = 0;
+    for (id, batch) in batches {
+        let batch = match batch {
+            Ok(batch) => batch,
+            Err(ApiError::Unsupported) => continue,
+            Err(e) => {
+                errors.push((id, e));
+                continue;
+            }
+        };
+        answered += 1;
+        for r in batch {
+            match by_hash.get(&r.info_hash.to_lowercase()) {
+                Some(&i) if results[i].seeders >= r.seeders => {}
+                Some(&i) => results[i] = r,
+                None => {
+                    by_hash.insert(r.info_hash.to_lowercase(), results.len());
+                    results.push(r);
+                }
+            }
+        }
+    }
+    if answered == 0 {
+        return Err(if errors.is_empty() {
+            ApiError::Unsupported
+        } else {
+            errors.remove(0).1
+        });
+    }
+    if answered > 1 {
+        results.sort_by(order);
+    }
+    Ok(Aggregate { results, errors })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn result(source: &str, hash: &str, seeders: u32) -> SearchResult {
+        SearchResult {
+            source: source.into(),
+            id: hash.into(),
+            name: hash.into(),
+            info_hash: hash.into(),
+            size: 0,
+            seeders,
+            leechers: 0,
+            added: None,
+            category: SourceCategory::Other,
+            uploader: None,
+            num_files: None,
+            download_count: None,
+            status: None,
+            descr: None,
+            magnet: None,
+        }
+    }
+
+    fn by_seeders(a: &SearchResult, b: &SearchResult) -> std::cmp::Ordering {
+        b.seeders.cmp(&a.seeders)
+    }
+
+    #[test]
+    fn merge_dedups_by_info_hash_and_ranks() {
+        let agg = merge(
+            vec![
+                (
+                    "tpb",
+                    Ok(vec![result("tpb", "AAA", 5), result("tpb", "bbb", 1)]),
+                ),
+                (
+                    "nyaa",
+                    Ok(vec![result("nyaa", "aaa", 9), result("nyaa", "ccc", 3)]),
+                ),
+            ],
+            by_seeders,
+        )
+        .unwrap();
+        let got: Vec<_> = agg
+            .results
+            .iter()
+            .map(|r| (r.source.as_str(), r.seeders))
+            .collect();
+        assert_eq!(got, vec![("nyaa", 9), ("nyaa", 3), ("tpb", 1)]);
+        assert!(agg.errors.is_empty());
+    }
+
+    #[test]
+    fn merge_keeps_single_source_order() {
+        let agg = merge(
+            vec![(
+                "tpb",
+                Ok(vec![result("tpb", "a", 1), result("tpb", "b", 9)]),
+            )],
+            by_seeders,
+        )
+        .unwrap();
+        assert_eq!(agg.results[0].info_hash, "a");
+    }
+
+    #[test]
+    fn merge_reports_partial_failures() {
+        let agg = merge(
+            vec![
+                ("tpb", Err(ApiError::RateLimited)),
+                ("nyaa", Ok(vec![result("nyaa", "a", 1)])),
+            ],
+            by_seeders,
+        )
+        .unwrap();
+        assert_eq!(agg.results.len(), 1);
+        assert_eq!(agg.errors.len(), 1);
+        assert_eq!(agg.errors[0].0, "tpb");
+    }
+
+    #[test]
+    fn merge_fails_when_every_source_fails() {
+        let err = merge(
+            vec![
+                ("tpb", Err(ApiError::RateLimited)),
+                ("nyaa", Err(ApiError::Unsupported)),
+            ],
+            by_seeders,
+        )
+        .unwrap_err();
+        assert!(matches!(err, ApiError::RateLimited));
+    }
+
+    #[test]
+    fn merge_skips_unsupported_sources() {
+        let agg = merge(
+            vec![
+                ("tpb", Ok(vec![result("tpb", "a", 1)])),
+                ("nyaa", Err(ApiError::Unsupported)),
+            ],
+            by_seeders,
+        )
+        .unwrap();
+        assert_eq!(agg.results.len(), 1);
+        assert!(agg.errors.is_empty());
+    }
+
+    #[test]
+    fn from_ids_resolves_lists() {
+        let ids = |spec| from_ids(spec).map(|v| v.iter().map(|s| s.id()).collect::<Vec<_>>());
+        assert_eq!(ids("all").unwrap(), vec!["tpb", "nyaa"]);
+        assert_eq!(ids("nyaa, tpb,nyaa").unwrap(), vec!["nyaa", "tpb"]);
+        assert!(ids("bogus").unwrap_err().contains("unknown source"));
+        assert!(ids("").is_err());
+    }
 }

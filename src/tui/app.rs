@@ -7,7 +7,7 @@ use ratatui::crossterm::event::Event;
 use ratatui::widgets::TableState;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::sources::{SearchResult, Source, SourceCategory};
+use crate::sources::{self, Aggregate, SearchResult, Source, SourceCategory};
 
 use super::download::spawn_download;
 
@@ -95,7 +95,7 @@ pub struct Download {
 pub enum Msg {
     Term(Event),
     /// Results for request `gen` in `category`. Stale gens are dropped.
-    Results(u64, Category, Result<Vec<SearchResult>, String>),
+    Results(u64, Category, Result<Aggregate, String>),
     DlProgress {
         id: String,
         name: String,
@@ -111,7 +111,10 @@ pub enum Msg {
 }
 
 pub struct App {
-    pub source: Arc<dyn Source>,
+    /// Sources enabled for this session.
+    pub sources: Vec<Arc<dyn Source>>,
+    /// Index into `sources` to query alone, or `None` to query them all.
+    pub source_filter: Option<usize>,
     pub session: Option<Arc<Session>>,
     pub output_dir: PathBuf,
     pub tx: UnboundedSender<Msg>,
@@ -138,13 +141,14 @@ pub struct App {
 
 impl App {
     pub fn new(
-        source: Arc<dyn Source>,
+        sources: Vec<Arc<dyn Source>>,
         session: Option<Arc<Session>>,
         output_dir: PathBuf,
         tx: UnboundedSender<Msg>,
     ) -> Self {
         Self {
-            source,
+            sources,
+            source_filter: None,
             session,
             output_dir,
             tx,
@@ -161,6 +165,41 @@ impl App {
             show_detail: false,
             show_help: false,
             should_quit: false,
+        }
+    }
+
+    // --- sources ------------------------------------------------------------
+
+    /// The sources the next fetch will query.
+    pub fn active_sources(&self) -> Vec<Arc<dyn Source>> {
+        match self.source_filter {
+            Some(i) => vec![self.sources[i].clone()],
+            None => self.sources.clone(),
+        }
+    }
+
+    /// Label for the current source scope.
+    pub fn source_scope(&self) -> &'static str {
+        match self.source_filter {
+            Some(i) => self.sources[i].name(),
+            None if self.sources.len() == 1 => self.sources[0].name(),
+            None => "All sources",
+        }
+    }
+
+    /// Step through "all sources" and then each source alone, and refetch.
+    pub fn cycle_source(&mut self) {
+        if self.sources.len() < 2 {
+            return;
+        }
+        self.source_filter = match self.source_filter {
+            None => Some(0),
+            Some(i) if i + 1 < self.sources.len() => Some(i + 1),
+            Some(_) => None,
+        };
+        self.fetch();
+        if !self.loading {
+            self.status = format!("Source: {}", self.source_scope());
         }
     }
 
@@ -269,7 +308,7 @@ impl App {
         self.gen += 1;
         let gen = self.gen;
         let category = self.category;
-        let source = self.source.clone();
+        let sources = self.active_sources();
         let tx = self.tx.clone();
         let query = self.query.trim().to_string();
 
@@ -288,8 +327,8 @@ impl App {
 
         tokio::spawn(async move {
             let res = match category.source_category() {
-                None => source.search(&query).await,
-                Some(c) => source.browse(c).await,
+                None => sources::search_all(&sources, &query).await,
+                Some(c) => sources::browse_all(&sources, c).await,
             };
             let res = res.map_err(|e| e.to_string());
             let _ = tx.send(Msg::Results(gen, category, res));
@@ -297,19 +336,14 @@ impl App {
     }
 
     /// Apply a settled fetch result.
-    pub fn apply_results(
-        &mut self,
-        gen: u64,
-        category: Category,
-        res: Result<Vec<SearchResult>, String>,
-    ) {
+    pub fn apply_results(&mut self, gen: u64, category: Category, res: Result<Aggregate, String>) {
         if gen != self.gen {
             return; // stale response
         }
         self.loading = false;
         match res {
-            Ok(torrents) => {
-                self.results = torrents;
+            Ok(agg) => {
+                self.results = agg.results;
                 if self.results.is_empty() {
                     self.table_state.select(None);
                     self.status = "No results found".into();
@@ -320,6 +354,9 @@ impl App {
                         c => c.title().to_string(),
                     };
                     self.status = format!("{} results for {}", self.results.len(), scope);
+                }
+                for (source, _) in &agg.errors {
+                    self.status.push_str(&format!(" · {source} failed"));
                 }
             }
             Err(e) => {
@@ -431,13 +468,14 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sources::TpbSource;
+    use crate::pirateclient::ApiError;
+    use crate::sources::{NyaaSource, TpbSource};
     use tokio::sync::mpsc;
 
     fn test_app() -> App {
         let (tx, _rx) = mpsc::unbounded_channel();
         App::new(
-            Arc::new(TpbSource::new()),
+            vec![Arc::new(TpbSource::new()), Arc::new(NyaaSource::new())],
             None,
             PathBuf::from("/tmp/piratebay-test"),
             tx,
@@ -464,6 +502,13 @@ mod tests {
         }
     }
 
+    fn ok(results: Vec<SearchResult>) -> Result<Aggregate, String> {
+        Ok(Aggregate {
+            results,
+            errors: Vec::new(),
+        })
+    }
+
     #[test]
     fn category_tabs_map_to_source_categories() {
         assert_eq!(Category::All.source_category(), None);
@@ -486,7 +531,7 @@ mod tests {
     fn apply_results_populates_and_selects_first() {
         let mut app = test_app();
         let rows = vec![torrent("1", "First"), torrent("2", "Second")];
-        app.apply_results(app.gen, Category::Video, Ok(rows));
+        app.apply_results(app.gen, Category::Video, ok(rows));
         assert_eq!(app.results.len(), 2);
         assert_eq!(app.table_state.selected(), Some(0));
         assert!(app.status.contains("2 results for Video"));
@@ -496,17 +541,45 @@ mod tests {
     #[test]
     fn apply_results_reports_empty() {
         let mut app = test_app();
-        app.apply_results(app.gen, Category::All, Ok(vec![]));
+        app.apply_results(app.gen, Category::All, ok(vec![]));
         assert!(app.results.is_empty());
         assert_eq!(app.table_state.selected(), None);
         assert_eq!(app.status, "No results found");
     }
 
     #[test]
+    fn apply_results_flags_failed_sources() {
+        let mut app = test_app();
+        let agg = Aggregate {
+            results: vec![torrent("1", "Movie")],
+            errors: vec![("nyaa", ApiError::RateLimited)],
+        };
+        app.apply_results(app.gen, Category::Video, Ok(agg));
+        assert_eq!(app.results.len(), 1);
+        assert!(app.status.ends_with("· nyaa failed"));
+    }
+
+    #[test]
+    fn cycle_source_walks_each_source_then_all() {
+        let mut app = test_app();
+        assert_eq!(app.active_sources().len(), 2);
+        assert_eq!(app.source_scope(), "All sources");
+        app.cycle_source();
+        assert_eq!(app.source_scope(), "The Pirate Bay");
+        assert_eq!(app.active_sources().len(), 1);
+        app.cycle_source();
+        assert_eq!(app.source_scope(), "Nyaa");
+        app.cycle_source();
+        assert_eq!(app.source_filter, None);
+        // Nothing to fetch with an empty query, so the status names the scope.
+        assert_eq!(app.status, "Source: All sources");
+    }
+
+    #[test]
     fn apply_results_ignores_stale_generation() {
         let mut app = test_app();
         app.gen = 5;
-        app.apply_results(4, Category::All, Ok(vec![torrent("1", "Late")]));
+        app.apply_results(4, Category::All, ok(vec![torrent("1", "Late")]));
         assert!(app.results.is_empty());
     }
 
@@ -522,7 +595,7 @@ mod tests {
     fn selection_stays_within_bounds() {
         let mut app = test_app();
         let rows = (0..3).map(|i| torrent(&i.to_string(), "T")).collect();
-        app.apply_results(app.gen, Category::Video, Ok(rows));
+        app.apply_results(app.gen, Category::Video, ok(rows));
 
         app.select_next(); // 0 -> 1
         app.select_next(); // 1 -> 2
@@ -542,7 +615,7 @@ mod tests {
     #[test]
     fn download_without_session_reports_status() {
         let mut app = test_app();
-        app.apply_results(app.gen, Category::Video, Ok(vec![torrent("1", "Movie")]));
+        app.apply_results(app.gen, Category::Video, ok(vec![torrent("1", "Movie")]));
         app.download_selected();
         // No session was created, so nothing is enqueued.
         assert!(app.downloads.is_empty());

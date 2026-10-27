@@ -1,0 +1,44 @@
+<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:nyaa="https://nyaa.si/xmlns/nyaa" version="2.0">
+	<channel>
+		<title>Nyaa - &#34;one piece&#34; - Torrent File RSS</title>
+		<description>RSS Feed for &#34;one piece&#34;</description>
+		<link>https://nyaa.si/</link>
+		<atom:link href="https://nyaa.si/?page=rss" rel="self" type="application/rss+xml" />
+		<item>
+			<title>[ToonsHub] One Piece EP1157 1080p CR WEB-DL DUAL AAC2.0 H.264 (Dual-Audio, Multi-Subs)</title>
+				<link>https://nyaa.si/download/2179440.torrent</link>
+				<guid isPermaLink="true">https://nyaa.si/view/2179440</guid>
+				<pubDate>Tue, 27 Oct 2026 16:39:49 -0000</pubDate>
+
+				<nyaa:seeders>300</nyaa:seeders>
+				<nyaa:leechers>24</nyaa:leechers>
+				<nyaa:downloads>791</nyaa:downloads>
+				<nyaa:infoHash>65d17a4e4bdd09fd79cc0fcd0db69c5a1427339c</nyaa:infoHash>
+			<nyaa:categoryId>1_2</nyaa:categoryId>
+			<nyaa:category>Anime - English-translated</nyaa:category>
+			<nyaa:size>1.4 GiB</nyaa:size>
+			<nyaa:comments>0</nyaa:comments>
+			<nyaa:trusted>No</nyaa:trusted>
+			<nyaa:remake>No</nyaa:remake>
+			<description><![CDATA[<a href="https://nyaa.si/view/2179440">#2179440 | [ToonsHub] One Piece EP1157 1080p CR WEB-DL DUAL AAC2.0 H.264 (Dual-Audio, Multi-Subs)</a> | 1.4 GiB | Anime - English-translated | 65d17a4e4bdd09fd79cc0fcd0db69c5a1427339c]]></description>
+		</item>
+		<item>
+			<title>[Yameii] ONE PIECE - S23E02 [English Dub] [CR WEB-DL 1080p H264 AAC] [758E6CDA]</title>
+				<link>https://nyaa.si/download/2179420.torrent</link>
+				<guid isPermaLink="true">https://nyaa.si/view/2179420</guid>
+				<pubDate>Tue, 27 Oct 2026 16:09:33 -0000</pubDate>
+
+				<nyaa:seeders>416</nyaa:seeders>
+				<nyaa:leechers>17</nyaa:leechers>
+				<nyaa:downloads>1127</nyaa:downloads>
+				<nyaa:infoHash>eacd5b76863aa53c06cb7d2d28198e71f3a2a515</nyaa:infoHash>
+			<nyaa:categoryId>1_2</nyaa:categoryId>
+			<nyaa:category>Anime - English-translated</nyaa:category>
+			<nyaa:size>1.3 GiB</nyaa:size>
+			<nyaa:comments>0</nyaa:comments>
+			<nyaa:trusted>No</nyaa:trusted>
+			<nyaa:remake>No</nyaa:remake>
+			<description><![CDATA[<a href="https://nyaa.si/view/2179420">#2179420 | [Yameii] ONE PIECE - S23E02 [English Dub] [CR WEB-DL 1080p H264 AAC] [758E6CDA]</a> | 1.3 GiB | Anime - English-translated | eacd5b76863aa53c06cb7d2d28198e71f3a2a515]]></description>
+		</item>
+	</channel>
+</rss>

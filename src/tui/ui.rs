@@ -128,7 +128,14 @@ fn render_tabs(f: &mut Frame, app: &App, area: Rect) {
         .title(Span::styled(
             " Categories ",
             Style::default().fg(PRIMARY).bold(),
-        ));
+        ))
+        .title_top(
+            Line::from(Span::styled(
+                format!(" ⚓ {} ", app.source_scope()),
+                Style::default().fg(LINK).bold(),
+            ))
+            .right_aligned(),
+        );
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -183,6 +190,7 @@ fn render_results(f: &mut Frame, app: &mut App, area: Rect) {
 
     let header = Row::new(vec![
         Cell::from(""),
+        Cell::from("Src"),
         Cell::from("Category"),
         Cell::from("Name"),
         Cell::from("Size"),
@@ -208,6 +216,7 @@ fn render_results(f: &mut Frame, app: &mut App, area: Rect) {
         };
         Row::new(vec![
             Cell::from(Line::from(marker)),
+            Cell::from(t.source.clone()).style(Style::default().fg(LINK)),
             Cell::from(format!("{icon} {label}")).style(Style::default().fg(MUTED)),
             Cell::from(t.name.clone()).style(Style::default().fg(SKY)),
             Cell::from(human_bytes(t.size)).style(Style::default().fg(SECONDARY)),
@@ -220,6 +229,7 @@ fn render_results(f: &mut Frame, app: &mut App, area: Rect) {
 
     let widths = [
         Constraint::Length(1),
+        Constraint::Length(4),
         Constraint::Length(10),
         Constraint::Min(20),
         Constraint::Length(10),
@@ -328,6 +338,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     } else {
         spans.extend(hint("↑↓/jk", "move"));
         spans.extend(hint("←→", "category"));
+        spans.extend(hint("s", "source"));
         spans.extend(hint("/", "search"));
         spans.extend(hint("d", "download"));
         spans.extend(hint("c", "copy magnet"));
@@ -368,6 +379,7 @@ fn render_detail(f: &mut Frame, app: &App) {
             Style::default().fg(SKY).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
+        field("Source", t.source.clone(), LINK),
         field("Category", format!("{icon} {label}"), TEXT),
         field("Size", human_bytes(t.size), SECONDARY),
         field("Seeders", t.seeders.to_string(), HIGHLIGHT),
@@ -451,6 +463,7 @@ fn render_help(f: &mut Frame) {
         key("PgUp PgDn", "jump by a page"),
         key("g  G", "jump to top / bottom"),
         key("← →", "previous / next category"),
+        key("s", "cycle source (all / one at a time)"),
         key("d", "download the selected torrent"),
         key("c  or  y", "copy magnet link to clipboard"),
         key("r", "refresh current view"),

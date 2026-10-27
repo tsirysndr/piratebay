@@ -15,6 +15,11 @@ use crate::{
 pub enum ApiError {
     Reqwest(reqwest::Error),
     RateLimited,
+    /// The source answered but its payload could not be parsed.
+    Parse(String),
+    /// The source has no equivalent for the requested operation (e.g. a
+    /// category it does not carry).
+    Unsupported,
 }
 
 impl std::fmt::Display for ApiError {
@@ -24,6 +29,8 @@ impl std::fmt::Display for ApiError {
             ApiError::RateLimited => {
                 f.write_str("Rate limited (429): too many requests, try again later")
             }
+            ApiError::Parse(e) => write!(f, "Unexpected response: {e}"),
+            ApiError::Unsupported => f.write_str("Not supported by this source"),
         }
     }
 }
@@ -32,7 +39,7 @@ impl std::error::Error for ApiError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             ApiError::Reqwest(e) => Some(e),
-            ApiError::RateLimited => None,
+            ApiError::RateLimited | ApiError::Parse(_) | ApiError::Unsupported => None,
         }
     }
 }
