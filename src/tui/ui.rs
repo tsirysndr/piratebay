@@ -8,7 +8,7 @@ use ratatui::widgets::{
 };
 use ratatui::Frame;
 
-use super::app::{App, Category, InputMode};
+use super::app::{App, Category, Confirm, DlState, Download, Focus, InputMode};
 
 // Dark-canvas palette: teal primary, cyan secondary, purple accent, green
 // highlight, orange link, sky blue, red error, light-gray muted. Borders keep
@@ -24,6 +24,7 @@ const MUTED: Color = Color::Rgb(200, 210, 220); // muted meta text
 const TEXT: Color = Color::Rgb(0xEC, 0xEC, 0xEC); // near-white body text
 const BROWN: Color = Color::Rgb(0xCB, 0xA1, 0x72); // light ship-hull brown — borders
 const SEL_BG: Color = Color::Rgb(0x24, 0x2C, 0x36); // selected-row background
+const SEL_BG_FOCUS: Color = Color::Rgb(0x3A, 0x34, 0x5C); // selected download (focused panel)
 
 pub fn render(f: &mut Frame, app: &mut App) {
     let has_downloads = !app.downloads.is_empty();
@@ -57,6 +58,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     }
     if app.show_help {
         render_help(f);
+    }
+    if let Some(confirm) = &app.confirm {
+        render_confirm(f, app, confirm);
     }
 }
 
@@ -204,10 +208,10 @@ fn render_results(f: &mut Frame, app: &mut App, area: Rect) {
 
     let rows = app.results.iter().map(|t| {
         let (icon, label) = t.category.label();
-        let dl = app.downloads.get(&t.info_hash);
-        let marker = match dl {
-            Some(d) if d.error.is_some() => Span::styled("✗", Style::default().fg(ERROR)),
-            Some(d) if d.done => Span::styled("✓", Style::default().fg(HIGHLIGHT)),
+        let marker = match app.download_for(&t.info_hash).map(|d| &d.state) {
+            Some(DlState::Error(_)) => Span::styled("✗", Style::default().fg(ERROR)),
+            Some(DlState::Done) => Span::styled("✓", Style::default().fg(HIGHLIGHT)),
+            Some(DlState::Paused) => Span::styled("⏸", Style::default().fg(MUTED)),
             Some(_) => Span::styled(
                 "▼",
                 Style::default().fg(PRIMARY).add_modifier(Modifier::BOLD),
@@ -255,13 +259,19 @@ fn render_results(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_downloads(f: &mut Frame, app: &App, area: Rect) {
+    let focused = app.focus == Focus::Downloads;
+    let resume_note = if app.persistent {
+        ""
+    } else {
+        " · not saved on quit"
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(BROWN))
+        .border_style(Style::default().fg(if focused { ACCENT } else { BROWN }))
         .title(Span::styled(
             format!(
-                " Downloads · {} active → {} ",
+                " Downloads · {} active → {}{resume_note} ",
                 app.active_downloads(),
                 app.output_dir.display()
             ),
@@ -270,53 +280,72 @@ fn render_downloads(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    let visible = inner.height as usize;
+    // Scroll so the selected download stays in view.
+    let offset = app.dl_selected.saturating_sub(visible.saturating_sub(1));
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(vec![Constraint::Length(1); inner.height as usize])
+        .constraints(vec![Constraint::Length(1); visible])
         .split(inner);
 
-    for (dl, row) in app
+    for (i, (dl, row)) in app
         .downloads
-        .values()
-        .take(inner.height as usize)
+        .iter()
+        .enumerate()
+        .skip(offset)
         .zip(rows.iter())
+        .map(|((i, dl), row)| (i, (dl, row)))
     {
-        let ratio = if dl.total > 0 {
-            (dl.downloaded as f64 / dl.total as f64).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let name = truncate(&dl.name, 34);
-        let label = if let Some(err) = &dl.error {
-            format!("✗ {name} — {err}")
-        } else if dl.done {
-            format!("✓ {name} — complete")
-        } else {
-            format!(
-                "▼ {name} — {} / {} @ {}",
-                human_bytes(dl.downloaded),
-                human_bytes(dl.total),
-                dl.speed.human_throughput_bytes()
-            )
-        };
-        let color = if dl.error.is_some() {
-            ERROR
-        } else if dl.done {
-            HIGHLIGHT
-        } else {
-            PRIMARY
-        };
-        let gauge = Gauge::default()
-            .gauge_style(Style::default().fg(color).bg(SEL_BG))
-            .ratio(if dl.error.is_some() { 1.0 } else { ratio })
-            .label(Span::styled(
-                label,
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        f.render_widget(gauge, *row);
+        let selected = focused && i == app.dl_selected;
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(2), Constraint::Min(10)])
+            .split(*row);
+        let cursor = if selected { "▶" } else { " " };
+        f.render_widget(
+            Paragraph::new(Span::styled(cursor, Style::default().fg(ACCENT).bold())),
+            cols[0],
+        );
+        f.render_widget(download_gauge(dl, selected), cols[1]);
     }
+}
+
+fn download_gauge(dl: &Download, selected: bool) -> Gauge<'static> {
+    let ratio = if dl.total > 0 {
+        (dl.downloaded as f64 / dl.total as f64).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let name = truncate(&dl.name, 34);
+    let progress = format!("{} / {}", human_bytes(dl.downloaded), human_bytes(dl.total));
+    let (label, color) = match &dl.state {
+        DlState::Error(err) => (format!("✗ {name} — {err}"), ERROR),
+        DlState::Done => (format!("✓ {name} — complete"), HIGHLIGHT),
+        DlState::Paused => (format!("⏸ {name} — paused at {progress}"), MUTED),
+        DlState::Queued => (format!("… {name} — fetching metadata"), SECONDARY),
+        DlState::Initializing => (format!("… {name} — checking {progress}"), SECONDARY),
+        DlState::Downloading => (
+            format!(
+                "▼ {name} — {progress} @ {}",
+                dl.speed.human_throughput_bytes()
+            ),
+            PRIMARY,
+        ),
+    };
+    let is_error = matches!(dl.state, DlState::Error(_));
+    Gauge::default()
+        .gauge_style(
+            Style::default()
+                .fg(color)
+                .bg(if selected { SEL_BG_FOCUS } else { SEL_BG }),
+        )
+        .ratio(if is_error { 1.0 } else { ratio })
+        .label(Span::styled(
+            label,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ))
 }
 
 fn render_footer(f: &mut Frame, app: &App, area: Rect) {
@@ -335,12 +364,19 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         spans.extend(hint("Enter", "search"));
         spans.extend(hint("Esc", "cancel"));
         spans.extend(hint("⌫", "delete"));
+    } else if app.focus == Focus::Downloads {
+        spans.extend(hint("↑↓/jk", "move"));
+        spans.extend(hint("p", "pause/resume"));
+        spans.extend(hint("x", "remove"));
+        spans.extend(hint("t/Esc", "back to results"));
+        spans.extend(hint("q", "quit"));
     } else {
         spans.extend(hint("↑↓/jk", "move"));
         spans.extend(hint("←→", "category"));
         spans.extend(hint("s", "source"));
         spans.extend(hint("/", "search"));
         spans.extend(hint("d", "download"));
+        spans.extend(hint("t", "downloads"));
         spans.extend(hint("c", "copy magnet"));
         spans.extend(hint("Enter", "details"));
         spans.extend(hint("?", "help"));
@@ -466,6 +502,9 @@ fn render_help(f: &mut Frame) {
         key("s", "cycle source (all / one at a time)"),
         key("d", "download the selected torrent"),
         key("c  or  y", "copy magnet link to clipboard"),
+        key("t", "focus the downloads panel"),
+        key("p  or  space", "pause / resume the selected download"),
+        key("x  or  Del", "remove the selected download"),
         key("r", "refresh current view"),
         key("?", "toggle this help"),
         key("q", "quit"),
@@ -485,6 +524,80 @@ fn render_help(f: &mut Frame) {
                 " ☠ Keybindings ",
                 Style::default().fg(SKY).bold(),
             )),
+    );
+    f.render_widget(popup, area);
+}
+
+fn render_confirm(f: &mut Frame, app: &App, confirm: &Confirm) {
+    let area = centered_rect(56, 30, f.area());
+    f.render_widget(Clear, area);
+
+    let key = |k: &'static str, d: &'static str| -> Line<'static> {
+        Line::from(vec![
+            Span::styled(format!("   {k:<6}"), Style::default().fg(SKY).bold()),
+            Span::styled(d, Style::default().fg(TEXT)),
+        ])
+    };
+
+    let (title, lines) = match confirm {
+        Confirm::Quit => {
+            let n = app.active_downloads();
+            let note = if app.persistent {
+                "They will resume the next time you open piratebay."
+            } else {
+                "They will stop, and won't resume automatically."
+            };
+            (
+                " Quit? ",
+                vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        format!("   {n} download(s) still in progress."),
+                        Style::default().fg(TEXT).bold(),
+                    )),
+                    Line::from(Span::styled(
+                        format!("   {note}"),
+                        Style::default().fg(MUTED),
+                    )),
+                    Line::from(""),
+                    key("y", "quit"),
+                    key("n", "stay"),
+                ],
+            )
+        }
+        Confirm::Remove(hash) => {
+            let name = app
+                .downloads
+                .iter()
+                .find(|d| &d.hash == hash)
+                .map(|d| d.name.as_str())
+                .unwrap_or(hash);
+            (
+                " Remove download? ",
+                vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        format!(
+                            "   {}",
+                            truncate(name, area.width.saturating_sub(6) as usize)
+                        ),
+                        Style::default().fg(SKY).bold(),
+                    )),
+                    Line::from(""),
+                    key("y", "remove, keep downloaded files"),
+                    key("f", "remove and delete files"),
+                    key("n", "cancel"),
+                ],
+            )
+        }
+    };
+
+    let popup = Paragraph::new(Text::from(lines)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .border_style(Style::default().fg(BROWN))
+            .title(Span::styled(title, Style::default().fg(ERROR).bold())),
     );
     f.render_widget(popup, area);
 }

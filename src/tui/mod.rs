@@ -6,35 +6,41 @@ mod ui;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
-use librqbit::{Session, SessionOptions};
+use anyhow::{anyhow, Context, Result};
+use librqbit::{Session, SessionOptions, SessionPersistenceConfig};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::sources::Source;
 
-use app::{App, Category, InputMode, Msg};
+use app::{App, Category, Confirm, Focus, InputMode, Msg};
+use download::spawn_monitor;
 
 /// Launch the interactive TUI. `output_dir` is where downloads are written.
 pub async fn run(output_dir: PathBuf, sources: Vec<Arc<dyn Source>>) -> Result<()> {
     tokio::fs::create_dir_all(&output_dir).await.ok();
 
-    // A shared torrent session powers every download started from the UI.
-    // Disable DHT/session persistence: a TUI is ephemeral and this avoids
-    // touching on-disk state (and the failures that come with it).
-    let opts = SessionOptions {
-        disable_dht_persistence: true,
-        fastresume: false,
-        persistence: None,
-        ..Default::default()
-    };
-    let session: Option<Arc<Session>> = Session::new_with_opts(output_dir.clone(), opts).await.ok();
+    let (session, persistent, status) = start_session(&output_dir).await;
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
 
     spawn_input_thread(tx.clone());
+    if let Some(session) = &session {
+        spawn_monitor(session.clone(), tx.clone());
+    }
 
-    let mut app = App::new(sources, session, output_dir, tx);
+    let mut app = App::new(sources, session.clone(), persistent, output_dir, tx);
+    if let Some(status) = status {
+        app.status = status;
+    }
+    if app
+        .session
+        .as_ref()
+        .is_some_and(|s| s.with_torrents(|t| t.count()) > 0)
+    {
+        // Restored downloads: start in navigation mode so `t` works right away.
+        app.input_mode = InputMode::Normal;
+    }
 
     let mut terminal = ratatui::init();
     let result = async {
@@ -43,15 +49,9 @@ pub async fn run(output_dir: PathBuf, sources: Vec<Arc<dyn Source>>) -> Result<(
             match msg {
                 Msg::Term(ev) => handle_term(&mut app, ev),
                 Msg::Results(gen, cat, res) => app.apply_results(gen, cat, res),
-                Msg::DlProgress {
-                    id,
-                    name,
-                    downloaded,
-                    total,
-                    speed,
-                    done,
-                } => app.on_progress(id, name, downloaded, total, speed, done),
-                Msg::DlError { id, err } => app.on_download_error(id, err),
+                Msg::Downloads(snapshot) => app.on_downloads(snapshot),
+                Msg::DlError { hash, err } => app.on_download_error(hash, err),
+                Msg::Status(status) => app.status = status,
             }
             if app.should_quit {
                 break;
@@ -63,7 +63,66 @@ pub async fn run(output_dir: PathBuf, sources: Vec<Arc<dyn Source>>) -> Result<(
     .await;
 
     ratatui::restore();
+    if let Some(session) = session {
+        // Pause torrents cleanly so their progress is saved for next time.
+        session.stop().await;
+    }
     result.map_err(|e| anyhow!(e))
+}
+
+/// Start the torrent session shared by every download started from the UI.
+///
+/// The session is persisted (with fastresume) under the user's data directory,
+/// so unfinished downloads resume — paused ones stay paused — the next time the
+/// TUI starts. If that fails, fall back to an in-memory session. Returns the
+/// session, whether it is persistent, and an optional status message.
+async fn start_session(
+    output_dir: &std::path::Path,
+) -> (Option<Arc<Session>>, bool, Option<String>) {
+    let persistent = async {
+        let folder = directories::ProjectDirs::from("", "", "piratebay")
+            .context("cannot determine the data directory")?
+            .data_dir()
+            .join("session");
+        Session::new_with_opts(
+            output_dir.to_path_buf(),
+            SessionOptions {
+                disable_dht_persistence: true,
+                fastresume: true,
+                persistence: Some(SessionPersistenceConfig::Json {
+                    folder: Some(folder),
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+    .await;
+
+    let err = match persistent {
+        Ok(session) => {
+            let restored = session.with_torrents(|torrents| torrents.count());
+            let status = (restored > 0).then(|| {
+                format!("Restored {restored} download(s) from the previous session — press t to manage them")
+            });
+            return (Some(session), true, status);
+        }
+        Err(e) => e,
+    };
+
+    let ephemeral = Session::new_with_opts(
+        output_dir.to_path_buf(),
+        SessionOptions {
+            disable_dht_persistence: true,
+            fastresume: false,
+            persistence: None,
+            ..Default::default()
+        },
+    )
+    .await
+    .ok();
+    let status = format!("Downloads won't be resumed after quitting: {err:#}");
+    (ephemeral, false, Some(status))
 }
 
 /// Blocking-read terminal events on a dedicated thread and forward them into
@@ -84,7 +143,27 @@ fn handle_term(app: &mut App, ev: Event) {
         return;
     }
 
+    // Ctrl+C always quits; with downloads running it asks first, and a second
+    // Ctrl+C confirms.
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.request_quit();
+        return;
+    }
+
     // Popups intercept keys first.
+    if let Some(confirm) = app.confirm.clone() {
+        match (confirm, key.code) {
+            (Confirm::Quit, KeyCode::Char('y') | KeyCode::Enter) => app.should_quit = true,
+            (Confirm::Remove(hash), KeyCode::Char('y') | KeyCode::Enter) => {
+                app.remove_download(&hash, false)
+            }
+            (Confirm::Remove(hash), KeyCode::Char('f')) => app.remove_download(&hash, true),
+            (_, KeyCode::Char('n') | KeyCode::Char('q') | KeyCode::Esc) => {}
+            _ => return, // keep the popup open on any other key
+        }
+        app.confirm = None;
+        return;
+    }
     if app.show_help {
         match key.code {
             KeyCode::Char('?') | KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter => {
@@ -118,17 +197,28 @@ fn handle_term(app: &mut App, ev: Event) {
             KeyCode::Right => app.input_right(),
             KeyCode::Home => app.input_home(),
             KeyCode::End => app.input_end(),
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.should_quit = true;
-            }
             KeyCode::Char(c) => app.input_insert(c),
             _ => {}
         },
-        InputMode::Normal => match key.code {
-            KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.should_quit = true;
+        InputMode::Normal if app.focus == Focus::Downloads => match key.code {
+            KeyCode::Char('q') => app.request_quit(),
+            KeyCode::Down | KeyCode::Char('j') => app.dl_select_next(),
+            KeyCode::Up | KeyCode::Char('k') => app.dl_select_prev(),
+            KeyCode::Char('p') | KeyCode::Char(' ') => app.toggle_pause_selected(),
+            KeyCode::Char('x') | KeyCode::Delete => app.request_remove_selected(),
+            KeyCode::Char('t') | KeyCode::Esc => app.toggle_focus(),
+            KeyCode::Char('/') | KeyCode::Char('i') => {
+                app.toggle_focus();
+                app.category = Category::All;
+                app.input_mode = InputMode::Editing;
+                app.input_end();
             }
+            KeyCode::Char('?') => app.show_help = true,
+            _ => {}
+        },
+        InputMode::Normal => match key.code {
+            KeyCode::Char('q') => app.request_quit(),
+            KeyCode::Char('t') => app.toggle_focus(),
             KeyCode::Char('/') | KeyCode::Char('i') => {
                 app.category = Category::All;
                 app.input_mode = InputMode::Editing;
