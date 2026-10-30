@@ -92,6 +92,7 @@ impl SearchResult {
     }
 }
 
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait Source: Send + Sync {
     /// Stable machine id, used in output and on the command line.
