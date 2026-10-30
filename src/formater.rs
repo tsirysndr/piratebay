@@ -3,12 +3,12 @@ use colored_json::ToColoredJson;
 use human_repr::HumanCount;
 use owo_colors::OwoColorize;
 use tabled::builder::Builder;
-use tabled::{object::Columns, Format, Style};
-use tabled::{Modify, Table};
+use tabled::Style;
 
-use crate::types::{Torrent, TorrentInfo};
+use crate::sources::SearchResult;
+use crate::types::TorrentInfo;
 
-pub fn format_results(results: Vec<Torrent>, json: bool) {
+pub fn format_results(results: Vec<SearchResult>, json: bool) {
     if json {
         println!(
             "{}",
@@ -19,13 +19,24 @@ pub fn format_results(results: Vec<Torrent>, json: bool) {
         );
         return;
     }
-    println!(
-        "\n{}",
-        Table::new(&results)
-            .with(Modify::new(Columns::single(0)).with(Format::new(format_date)))
-            .with(Modify::new(Columns::single(5)).with(Format::new(format_size)))
-            .with(Style::psql())
-    );
+    let mut builder = Builder::default();
+    builder.set_columns([
+        "source", "added", "id", "leechers", "name", "seeders", "size", "status", "username",
+    ]);
+    for r in results {
+        builder.add_record([
+            r.source,
+            r.added.map(format_date_i64).unwrap_or_default(),
+            r.id,
+            r.leechers.to_string(),
+            r.name,
+            r.seeders.to_string(),
+            r.size.human_count_bytes().to_string(),
+            r.status.unwrap_or_default(),
+            r.uploader.unwrap_or_default(),
+        ]);
+    }
+    println!("\n{}", builder.build().with(Style::psql()));
 }
 
 pub fn format_result(result: TorrentInfo, json: bool) {
@@ -73,26 +84,8 @@ pub fn format_result(result: TorrentInfo, json: bool) {
     }
 }
 
-fn format_date(s: &str) -> String {
-    if s == "added" {
-        return s.to_string();
-    }
-    let timestamp = s.parse::<i64>().unwrap();
-    let datetime: DateTime<Utc> = DateTime::from_timestamp(timestamp, 0).unwrap();
-    let date = datetime.format("%Y-%m-%d");
-    format!("{date}")
-}
-
 fn format_date_i64(timestamp: i64) -> String {
     let datetime: DateTime<Utc> = DateTime::from_timestamp(timestamp, 0).unwrap();
     let date = datetime.format("%Y-%m-%d");
     format!("{date}")
-}
-
-fn format_size(s: &str) -> String {
-    if s == "size" {
-        return s.to_string();
-    }
-    let size = s.parse::<u64>().unwrap_or(0);
-    size.human_count_bytes().to_string()
 }

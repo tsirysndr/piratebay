@@ -30,7 +30,12 @@
         inherit (pkgs) lib;
 
         craneLib = crane.mkLib pkgs;
-        src = craneLib.cleanCargoSource ./.;
+        src = lib.cleanSourceWith {
+          src = ./.;
+          filter = path: type:
+            craneLib.filterCargoSources path type
+            || lib.hasInfix "/src/sources/fixtures/" (toString path);
+        };
 
         # Common arguments can be set here to avoid repeating them later
         commonArgs = {

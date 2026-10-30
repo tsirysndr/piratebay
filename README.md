@@ -38,6 +38,7 @@ PirateBay helps you search **and download** torrents right from the terminal —
   - [Search](#search)
   - [Get torrent info (and magnet link)](#get-torrent-info-and-magnet-link)
   - [Browse a category](#browse-a-category)
+  - [Choosing sources](#choosing-sources)
   - [Download](#download)
   - [Streaming to a media player](#streaming-to-a-media-player)
   - [JSON output](#json-output)
@@ -49,7 +50,7 @@ PirateBay helps you search **and download** torrents right from the terminal —
 # Features
 
 - **Interactive TUI** (built with [ratatui](https://ratatui.rs)) — search, browse by category, inspect details, download, and copy magnet links without leaving the terminal
-- Search The Pirate Bay from the terminal (table or `--json` output)
+- Search The Pirate Bay, [Nyaa](https://nyaa.si), [Bitsearch](https://bitsearch.eu), [LimeTorrents](https://www.limetorrents.fun) and [TorrentDownload](https://www.torrentdownload.info) from the terminal — queried concurrently, merged and de-duplicated by info hash (table or `--json` output)
 - Browse by category (audio, video, applications, games, XXX, other)
 - Pure-Rust torrent downloader (powered by [`librqbit`](https://crates.io/crates/librqbit), rustls only — **no OpenSSL, no system C libs**)
 - Live progress bar with throughput (bytes/sec) and ETA
@@ -155,6 +156,7 @@ per-torrent progress bars — all driven from the keyboard.
 | `PgUp` `PgDn`      | Jump by a page                        |
 | `g` `G`            | Jump to top / bottom                  |
 | `←` `→` or `Tab`   | Previous / next category              |
+| `s`                | Cycle the source (all / one at a time) |
 | `d`                | Download the selected torrent         |
 | `c` or `y`         | Copy the magnet link to the clipboard |
 | `r`                | Refresh the current view              |
@@ -185,6 +187,35 @@ piratebay info 72614907
 piratebay category --video
 piratebay category --audio
 ```
+
+## Choosing sources
+
+Searches and category listings query every source by default and merge the
+results (ranked by seeders for searches, newest first for categories). Restrict
+them with the global `--source` (`-S`) flag:
+
+| Source          | Id                | Notes                                                         |
+| --------------- | ----------------- | ------------------------------------------------------------- |
+| The Pirate Bay  | `tpb`             | apibay.org JSON API                                           |
+| Nyaa            | `nyaa`            | RSS feed; no XXX category                                     |
+| Bitsearch       | `bitsearch`       | JSON API; 200 requests/day per IP without an API key          |
+| LimeTorrents    | `limetorrents`    | RSS feeds; no XXX category                                    |
+| TorrentDownload | `torrentdownload` | RSS feed; search only, no category browsing                   |
+
+```bash
+piratebay -S nyaa search "frieren"
+piratebay --source tpb,nyaa category --video
+piratebay -S tpb          # TUI limited to The Pirate Bay
+```
+
+Sites move between domains: point a source other than `tpb` at a mirror with
+`PIRATEBAY_<ID>_URL` (e.g. `PIRATEBAY_LIMETORRENTS_URL=https://www.limetorrents.lol`).
+A free [Bitsearch account](https://bitsearch.eu/api) raises its quota to 1,000
+requests/day: export the key as `PIRATEBAY_BITSEARCH_API_KEY`.
+
+If one source fails, results from the others are still shown and a warning is
+printed to stderr. `info` and `download <id>` take Pirate Bay ids; for other
+sources, download the magnet link (`--json` includes it).
 
 ## Download
 

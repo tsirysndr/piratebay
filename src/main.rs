@@ -5,10 +5,10 @@ use clap::{Arg, ArgAction, Command};
 use piratebay::{
     download::download,
     formater::{format_result, format_results},
-    pirateclient::PirateClient,
+    pirateclient::{ApiError, PirateClient},
+    sources::{self, Aggregate, SourceCategory},
     tui,
 };
-use urlencoding::encode;
 
 // Shared palette: teal primary, cyan secondary, purple accent, green
 // highlight, orange link, sky blue, red error.
@@ -49,7 +49,7 @@ fn cli() -> Command {
                                          __/ |
                                         |___/
 
-Search and download torrents from The Pirate Bay
+Search and download torrents from The Pirate Bay, Nyaa, Bitsearch, LimeTorrents and TorrentDownload
 "#,
         )
         .subcommand(
@@ -162,6 +162,15 @@ Search and download torrents from The Pirate Bay
                 ),
         )
         .arg(
+            Arg::new("source")
+                .short('S')
+                .long("source")
+                .help("Comma-separated sources to query: tpb, nyaa, bitsearch, limetorrents, torrentdownload, or all")
+                .value_name("SOURCES")
+                .default_value("all")
+                .global(true),
+        )
+        .arg(
             Arg::new("json")
                 .short('j')
                 .long("json")
@@ -175,6 +184,8 @@ Search and download torrents from The Pirate Bay
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = PirateClient::new();
     let matches = cli().get_matches();
+    let sources = sources::from_ids(matches.get_one::<String>("source").unwrap())
+        .unwrap_or_else(|e| cli().error(clap::error::ErrorKind::InvalidValue, e).exit());
 
     let json = matches.get_flag("json");
 
@@ -184,16 +195,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .get_one::<String>("output")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| std::env::current_dir().expect("cwd"));
-            tui::run(output).await?;
+            tui::run(output, sources).await?;
         }
         None => {
             let output = std::env::current_dir().expect("cwd");
-            tui::run(output).await?;
+            tui::run(output, sources).await?;
         }
         Some(("search", sub_matches)) => {
             let json = json || sub_matches.get_flag("json");
-            let query = encode(sub_matches.get_one::<String>("query").unwrap());
-            format_results(client.search(&query).await?, json);
+            let query = sub_matches.get_one::<String>("query").unwrap();
+            print_aggregate(sources::search_all(&sources, query).await?, json);
         }
         Some(("info", sub_matches)) => {
             let json = json || sub_matches.get_flag("json");
@@ -211,27 +222,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(("category", sub_matches)) => {
             let json = json || sub_matches.get_flag("json");
-            if sub_matches.get_flag("audio") {
-                format_results(client.list_audio().await?, json);
-            }
-            if sub_matches.get_flag("video") {
-                format_results(client.list_video().await?, json);
-            }
-            if sub_matches.get_flag("applications") {
-                format_results(client.list_applications().await?, json);
-            }
-            if sub_matches.get_flag("games") {
-                format_results(client.list_games().await?, json);
-            }
-            if sub_matches.get_flag("porn") {
-                format_results(client.list_porn().await?, json);
-            }
-            if sub_matches.get_flag("other") {
-                format_results(client.list_other().await?, json);
+            let flags = [
+                ("audio", SourceCategory::Audio),
+                ("video", SourceCategory::Video),
+                ("applications", SourceCategory::Applications),
+                ("games", SourceCategory::Games),
+                ("porn", SourceCategory::Porn),
+                ("other", SourceCategory::Other),
+            ];
+            for (flag, category) in flags {
+                if sub_matches.get_flag(flag) {
+                    match sources::browse_all(&sources, category).await {
+                        Ok(agg) => print_aggregate(agg, json),
+                        Err(ApiError::Unsupported) => {
+                            eprintln!("warning: --{flag} is not available on the selected sources")
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
+                }
             }
         }
         _ => unreachable!(),
     }
 
     Ok(())
+}
+
+/// Print merged results, warning on stderr about sources that failed.
+fn print_aggregate(agg: Aggregate, json: bool) {
+    for (source, err) in &agg.errors {
+        eprintln!("warning: {source}: {err}");
+    }
+    format_results(agg.results, json);
 }
