@@ -42,7 +42,7 @@
           inherit src;
 
           pname = "piratebay";
-          version = "0.4.1";
+          version = "0.5.0";
 
           buildInputs = [
           ] ++ lib.optionals pkgs.stdenv.isDarwin [
