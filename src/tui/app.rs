@@ -9,7 +9,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::sources::{self, Aggregate, SearchResult, Source, SourceCategory};
 
-use super::download::spawn_download;
+use super::download::{spawn_download, spawn_pause, spawn_remove};
 
 /// Tabs in the header. `All` is the free-text search scope; the rest browse a
 /// [`SourceCategory`].
@@ -80,14 +80,55 @@ pub enum InputMode {
     Editing,
 }
 
-/// A download in flight, keyed by info hash in [`App::downloads`].
+/// Where a download stands.
+#[derive(Clone, Debug, PartialEq)]
+pub enum DlState {
+    /// Requested from the UI; the session is still resolving the magnet link.
+    Queued,
+    /// In the session, checking existing data or fetching metadata.
+    Initializing,
+    Downloading,
+    Paused,
+    Done,
+    Error(String),
+}
+
+/// A download shown in the downloads panel, identified by its lowercase hex
+/// info hash.
+#[derive(Clone, Debug)]
 pub struct Download {
+    pub hash: String,
     pub name: String,
     pub downloaded: u64,
     pub total: u64,
     pub speed: f64,
-    pub done: bool,
-    pub error: Option<String>,
+    pub state: DlState,
+}
+
+impl Download {
+    /// Still transferring (or about to).
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self.state,
+            DlState::Queued | DlState::Initializing | DlState::Downloading
+        )
+    }
+}
+
+/// Which list the navigation keys act on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Focus {
+    Results,
+    Downloads,
+}
+
+/// A pending yes/no question shown in a popup.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Confirm {
+    /// Quit while downloads are still running.
+    Quit,
+    /// Remove the download with this info hash.
+    Remove(String),
 }
 
 /// Messages funneled into the single event loop from the input thread and the
@@ -96,18 +137,15 @@ pub enum Msg {
     Term(Event),
     /// Results for request `gen` in `category`. Stale gens are dropped.
     Results(u64, Category, Result<Aggregate, String>),
-    DlProgress {
-        id: String,
-        name: String,
-        downloaded: u64,
-        total: u64,
-        speed: f64,
-        done: bool,
-    },
+    /// Periodic snapshot of every torrent in the session.
+    Downloads(Vec<Download>),
+    /// Adding the download with this info hash failed.
     DlError {
-        id: String,
+        hash: String,
         err: String,
     },
+    /// A message for the status line.
+    Status(String),
 }
 
 pub struct App {
@@ -132,7 +170,17 @@ pub struct App {
     /// Monotonic request id; only the newest fetch is allowed to land.
     pub gen: u64,
 
-    pub downloads: HashMap<String, Download>,
+    /// Downloads in the order they were started (or restored).
+    pub downloads: Vec<Download>,
+    /// Selected row in the downloads panel.
+    pub dl_selected: usize,
+    pub focus: Focus,
+    /// Whether the session saves downloads so they resume on the next launch.
+    pub persistent: bool,
+    /// Queued downloads removed before reaching the session, with whether
+    /// their files should be deleted; they are dropped as soon as they appear.
+    pub cancelled: HashMap<String, bool>,
+    pub confirm: Option<Confirm>,
     /// Whether the torrent detail popup is open.
     pub show_detail: bool,
     pub show_help: bool,
@@ -143,6 +191,7 @@ impl App {
     pub fn new(
         sources: Vec<Arc<dyn Source>>,
         session: Option<Arc<Session>>,
+        persistent: bool,
         output_dir: PathBuf,
         tx: UnboundedSender<Msg>,
     ) -> Self {
@@ -161,7 +210,12 @@ impl App {
             loading: false,
             status: "Type a query and press Enter — or pick a category with ← / →".into(),
             gen: 0,
-            downloads: HashMap::new(),
+            downloads: Vec::new(),
+            dl_selected: 0,
+            focus: Focus::Results,
+            persistent,
+            cancelled: HashMap::new(),
+            confirm: None,
             show_detail: false,
             show_help: false,
             should_quit: false,
@@ -386,11 +440,11 @@ impl App {
             self.status = "Nothing selected to download".into();
             return;
         };
-        let id = t.info_hash.clone();
+        let hash = t.info_hash.to_lowercase();
         let name = t.name.clone();
         let magnet = t.magnet();
 
-        if self.downloads.contains_key(&id) {
+        if self.downloads.iter().any(|d| d.hash == hash) {
             self.status = format!("Already downloading: {name}");
             return;
         }
@@ -399,19 +453,17 @@ impl App {
             return;
         };
 
-        self.downloads.insert(
-            id.clone(),
-            Download {
-                name: name.clone(),
-                downloaded: 0,
-                total: 0,
-                speed: 0.0,
-                done: false,
-                error: None,
-            },
-        );
+        self.cancelled.remove(&hash);
+        self.downloads.push(Download {
+            hash: hash.clone(),
+            name,
+            downloaded: 0,
+            total: 0,
+            speed: 0.0,
+            state: DlState::Queued,
+        });
         self.status = format!("Downloading → {}", self.output_dir.display());
-        spawn_download(session, magnet, id, name, self.tx.clone());
+        spawn_download(session, magnet, hash, self.tx.clone());
     }
 
     /// Copy the highlighted torrent's magnet link to the system clipboard.
@@ -427,41 +479,155 @@ impl App {
         };
     }
 
-    pub fn on_progress(
-        &mut self,
-        id: String,
-        name: String,
-        downloaded: u64,
-        total: u64,
-        speed: f64,
-        done: bool,
-    ) {
-        let entry = self.downloads.entry(id).or_insert_with(|| Download {
-            name,
-            downloaded: 0,
-            total: 0,
-            speed: 0.0,
-            done: false,
-            error: None,
+    /// Merge a session snapshot: update known downloads, append new ones
+    /// (e.g. restored from the previous run) and drop ones the session no
+    /// longer has. Queued downloads and failed adds live only in the UI, so
+    /// they are kept until they show up or are removed.
+    pub fn on_downloads(&mut self, snapshot: Vec<Download>) {
+        let mut seen = Vec::with_capacity(snapshot.len());
+        for snap in snapshot {
+            if let Some(delete_files) = self.cancelled.remove(&snap.hash) {
+                // Removed while still queued: drop it now that it exists.
+                if let Some(session) = self.session.clone() {
+                    spawn_remove(session, snap.hash, delete_files, self.tx.clone());
+                }
+                continue;
+            }
+            seen.push(snap.hash.clone());
+            match self.downloads.iter_mut().find(|d| d.hash == snap.hash) {
+                Some(d) => *d = snap,
+                None => self.downloads.push(snap),
+            }
+        }
+        self.downloads.retain(|d| {
+            seen.contains(&d.hash) || matches!(d.state, DlState::Queued | DlState::Error(_))
         });
-        entry.downloaded = downloaded;
-        entry.total = total;
-        entry.speed = speed;
-        entry.done = done;
+        self.clamp_dl_selection();
     }
 
-    pub fn on_download_error(&mut self, id: String, err: String) {
-        if let Some(d) = self.downloads.get_mut(&id) {
-            d.error = Some(err);
+    pub fn on_download_error(&mut self, hash: String, err: String) {
+        if let Some(d) = self.downloads.iter_mut().find(|d| d.hash == hash) {
+            d.state = DlState::Error(err);
         }
     }
 
-    /// Number of downloads still running (not finished, no error).
+    /// Number of downloads still running.
     pub fn active_downloads(&self) -> usize {
-        self.downloads
-            .values()
-            .filter(|d| !d.done && d.error.is_none())
-            .count()
+        self.downloads.iter().filter(|d| d.is_active()).count()
+    }
+
+    /// The download for a search result's info hash, if any.
+    pub fn download_for(&self, info_hash: &str) -> Option<&Download> {
+        let hash = info_hash.to_lowercase();
+        self.downloads.iter().find(|d| d.hash == hash)
+    }
+
+    // --- downloads panel ---------------------------------------------------
+
+    /// Move keyboard focus between the results and the downloads panel.
+    pub fn toggle_focus(&mut self) {
+        self.focus = match self.focus {
+            Focus::Results if self.downloads.is_empty() => {
+                self.status = "No downloads yet".into();
+                Focus::Results
+            }
+            Focus::Results => Focus::Downloads,
+            Focus::Downloads => Focus::Results,
+        };
+        self.clamp_dl_selection();
+    }
+
+    fn clamp_dl_selection(&mut self) {
+        self.dl_selected = self.dl_selected.min(self.downloads.len().saturating_sub(1));
+        if self.downloads.is_empty() {
+            self.focus = Focus::Results;
+        }
+    }
+
+    pub fn selected_download(&self) -> Option<&Download> {
+        self.downloads.get(self.dl_selected)
+    }
+
+    pub fn dl_select_next(&mut self) {
+        if self.dl_selected + 1 < self.downloads.len() {
+            self.dl_selected += 1;
+        }
+    }
+
+    pub fn dl_select_prev(&mut self) {
+        self.dl_selected = self.dl_selected.saturating_sub(1);
+    }
+
+    /// Pause the selected download, or resume it if paused.
+    pub fn toggle_pause_selected(&mut self) {
+        let Some(d) = self.downloads.get_mut(self.dl_selected) else {
+            return;
+        };
+        let pause = match d.state {
+            DlState::Downloading | DlState::Initializing => true,
+            DlState::Paused => false,
+            DlState::Queued => {
+                self.status = "Still fetching metadata — try again in a moment".into();
+                return;
+            }
+            DlState::Done => {
+                self.status = "Download already complete".into();
+                return;
+            }
+            DlState::Error(_) => {
+                self.status = "Download failed — remove it and retry".into();
+                return;
+            }
+        };
+        let Some(session) = self.session.clone() else {
+            return;
+        };
+        // Optimistic update; the next snapshot confirms it.
+        d.state = if pause {
+            DlState::Paused
+        } else {
+            DlState::Downloading
+        };
+        d.speed = 0.0;
+        self.status = format!("{} {}", if pause { "Paused" } else { "Resumed" }, d.name);
+        spawn_pause(session, d.hash.clone(), pause, self.tx.clone());
+    }
+
+    /// Ask whether to remove the selected download.
+    pub fn request_remove_selected(&mut self) {
+        if let Some(d) = self.selected_download() {
+            self.confirm = Some(Confirm::Remove(d.hash.clone()));
+        }
+    }
+
+    /// Remove a download from the panel and the session; `delete_files` also
+    /// deletes what was downloaded so far.
+    pub fn remove_download(&mut self, hash: &str, delete_files: bool) {
+        let Some(pos) = self.downloads.iter().position(|d| d.hash == hash) else {
+            return;
+        };
+        let d = self.downloads.remove(pos);
+        self.clamp_dl_selection();
+        self.status = format!(
+            "Removed {}{}",
+            d.name,
+            if delete_files { " and its files" } else { "" }
+        );
+        if d.state == DlState::Queued {
+            // Not in the session yet: drop it once the magnet resolves.
+            self.cancelled.insert(d.hash, delete_files);
+        } else if let Some(session) = self.session.clone() {
+            spawn_remove(session, d.hash, delete_files, self.tx.clone());
+        }
+    }
+
+    /// Quit, asking first if downloads are still running.
+    pub fn request_quit(&mut self) {
+        if self.active_downloads() > 0 && self.confirm != Some(Confirm::Quit) {
+            self.confirm = Some(Confirm::Quit);
+        } else {
+            self.should_quit = true;
+        }
     }
 }
 
@@ -477,6 +643,7 @@ mod tests {
         App::new(
             vec![Arc::new(TpbSource::new()), Arc::new(NyaaSource::new())],
             None,
+            true,
             PathBuf::from("/tmp/piratebay-test"),
             tx,
         )
@@ -683,12 +850,128 @@ mod tests {
         assert_eq!(app.query, "caf");
     }
 
+    fn download(hash: &str, state: DlState) -> Download {
+        Download {
+            hash: hash.into(),
+            name: hash.to_uppercase(),
+            downloaded: 50,
+            total: 100,
+            speed: 1.0,
+            state,
+        }
+    }
+
     #[test]
-    fn download_progress_tracks_active_count() {
+    fn download_snapshots_track_active_count() {
         let mut app = test_app();
-        app.on_progress("a".into(), "A".into(), 50, 100, 1.0, false);
-        app.on_progress("b".into(), "B".into(), 100, 100, 0.0, true);
-        assert_eq!(app.downloads.len(), 2);
+        app.on_downloads(vec![
+            download("a", DlState::Downloading),
+            download("b", DlState::Done),
+            download("c", DlState::Paused),
+        ]);
+        assert_eq!(app.downloads.len(), 3);
         assert_eq!(app.active_downloads(), 1);
+    }
+
+    #[test]
+    fn snapshots_keep_queued_and_drop_vanished_downloads() {
+        let mut app = test_app();
+        app.downloads = vec![
+            download("queued", DlState::Queued),
+            download("failed", DlState::Error("boom".into())),
+            download("gone", DlState::Downloading),
+            download("live", DlState::Initializing),
+        ];
+        app.on_downloads(vec![
+            download("live", DlState::Downloading),
+            download("restored", DlState::Paused),
+        ]);
+        let hashes: Vec<_> = app.downloads.iter().map(|d| d.hash.as_str()).collect();
+        assert_eq!(hashes, vec!["queued", "failed", "live", "restored"]);
+        assert_eq!(app.downloads[2].state, DlState::Downloading);
+    }
+
+    #[test]
+    fn download_for_matches_hash_case_insensitively() {
+        let mut app = test_app();
+        app.on_downloads(vec![download("abcdef", DlState::Downloading)]);
+        assert!(app.download_for("ABCDEF").is_some());
+        assert!(app.download_for("012345").is_none());
+    }
+
+    #[test]
+    fn focus_moves_to_downloads_only_when_there_are_some() {
+        let mut app = test_app();
+        app.toggle_focus();
+        assert_eq!(app.focus, Focus::Results);
+        assert_eq!(app.status, "No downloads yet");
+
+        app.on_downloads(vec![download("a", DlState::Downloading)]);
+        app.toggle_focus();
+        assert_eq!(app.focus, Focus::Downloads);
+        app.toggle_focus();
+        assert_eq!(app.focus, Focus::Results);
+    }
+
+    #[test]
+    fn download_selection_stays_within_bounds() {
+        let mut app = test_app();
+        app.on_downloads(vec![
+            download("a", DlState::Downloading),
+            download("b", DlState::Downloading),
+        ]);
+        app.dl_select_prev();
+        assert_eq!(app.dl_selected, 0);
+        app.dl_select_next();
+        app.dl_select_next();
+        assert_eq!(app.dl_selected, 1);
+        // The selected row vanishing pulls the selection back in range.
+        app.on_downloads(vec![download("a", DlState::Downloading)]);
+        assert_eq!(app.dl_selected, 0);
+    }
+
+    #[test]
+    fn pause_toggle_refuses_unpausable_states() {
+        let mut app = test_app();
+        app.downloads = vec![download("q", DlState::Queued)];
+        app.toggle_pause_selected();
+        assert!(app.status.contains("metadata"));
+        assert_eq!(app.downloads[0].state, DlState::Queued);
+
+        app.downloads = vec![download("d", DlState::Done)];
+        app.toggle_pause_selected();
+        assert!(app.status.contains("complete"));
+    }
+
+    #[test]
+    fn removing_a_queued_download_cancels_it() {
+        let mut app = test_app();
+        app.downloads = vec![download("q", DlState::Queued)];
+        app.request_remove_selected();
+        assert_eq!(app.confirm, Some(Confirm::Remove("q".into())));
+        app.remove_download("q", true);
+        assert!(app.downloads.is_empty());
+        assert_eq!(app.cancelled.get("q"), Some(&true));
+
+        // When it later shows up in the session it is not listed again.
+        app.on_downloads(vec![download("q", DlState::Initializing)]);
+        assert!(app.downloads.is_empty());
+        assert!(app.cancelled.is_empty());
+    }
+
+    #[test]
+    fn quitting_with_active_downloads_asks_first() {
+        let mut app = test_app();
+        app.request_quit();
+        assert!(app.should_quit, "nothing running: quit straight away");
+
+        let mut app = test_app();
+        app.on_downloads(vec![download("a", DlState::Downloading)]);
+        app.request_quit();
+        assert!(!app.should_quit);
+        assert_eq!(app.confirm, Some(Confirm::Quit));
+        // Asking again (e.g. a second Ctrl+C) forces the quit.
+        app.request_quit();
+        assert!(app.should_quit);
     }
 }
