@@ -7,9 +7,7 @@
   <a href="https://crates.io/crates/piratebay" target="_blank">
     <img src="https://img.shields.io/crates/v/piratebay.svg" />
   </a>
-  <a href="https://crates.io/crates/piratebay" target="_blank">
-    <img src="https://img.shields.io/crates/dr/piratebay" />
-  </a>
+  <img alt="GitHub Downloads (all assets, all releases)" src="https://img.shields.io/github/downloads/tsirysndr/piratebay/total">
   <a href="https://docs.rs/piratebay" target="_blank">
     <img src="https://docs.rs/piratebay/badge.svg" />
   </a>
@@ -159,12 +157,30 @@ per-torrent progress bars — all driven from the keyboard.
 | `s`                | Cycle the source (all / one at a time) |
 | `d`                | Download the selected torrent         |
 | `c` or `y`         | Copy the magnet link to the clipboard |
+| `t`                | Focus the downloads panel             |
 | `r`                | Refresh the current view              |
 | `?`                | Toggle the help popup                 |
 | `q`                | Quit                                  |
 
 Inside the search box, `←` `→`, `Home`/`End`, and `Backspace`/`Delete` edit the
 query at the cursor position.
+
+With the downloads panel focused (`t`):
+
+| Key                | Action                                          |
+| ------------------ | ----------------------------------------------- |
+| `↑` `↓` or `j` `k` | Select a download                               |
+| `p` or `Space`     | Pause / resume it                               |
+| `x` or `Delete`    | Remove it — keeping or deleting downloaded files |
+| `t` or `Esc`       | Back to the results                             |
+
+### Resuming downloads
+
+Downloads survive quitting the TUI: their state is saved under your data
+directory (`~/Library/Application Support/piratebay` on macOS,
+`~/.local/share/piratebay` on Linux), and the next time you open the TUI
+unfinished downloads pick up where they left off — paused ones stay paused.
+Quitting while downloads are running asks for confirmation first.
 
 # CLI Usage
 
