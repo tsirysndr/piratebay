@@ -17,10 +17,25 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - name: Setup Cachix
-        uses: cachix/cachix-action@v17
+      - name: Checkout FluentCI tooling
+        uses: actions/checkout@v4
         with:
-          name: tsirysndr
-          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+          ref: ${{ github.workflow_sha }}
+          path: .ci-tooling
+      - uses: fluentci-io/setup-fluentci@next
+      - uses: ./.ci-tooling/.github/actions/fluentci-toolchain
+      - name: Set up determinate-nix
+        run: fluentci run setup-determinate-nix setup --sudo --trusted-users '["runner"]' --extra-conf '["experimental-features = nix-command flakes"]' | node "$GITHUB_WORKSPACE/.ci-tooling/.fluentci/github-env.mjs"
+        shell: bash
+      - name: Configure Cachix with FluentCI
+        run: fluentci run --work-dir "$GITHUB_WORKSPACE/.ci-tooling" ci cachix --directory "$GITHUB_WORKSPACE" --operation setup --cache tsirysndr
+        env:
+          CACHIX_AUTH_TOKEN: "${{ secrets.CACHIX_AUTH_TOKEN }}"
       - run: nix build
+      - name: Push result to Cachix
+        run: fluentci run --work-dir "$GITHUB_WORKSPACE/.ci-tooling" ci cachix --directory "$GITHUB_WORKSPACE" --operation push --cache tsirysndr
+        env:
+          CACHIX_AUTH_TOKEN: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+    defaults:
+      run:
+        shell: bash

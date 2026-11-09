@@ -22,3 +22,15 @@ target/
 result/
 
 # End of https://www.toptal.com/developers/gitignore/api/rust
+
+# FluentCI generated SDKs, compiler outputs, and workflow tooling checkout
+/.ci-tooling/
+.fluentci/**/.sdk/
+.fluentci/**/.spago/
+.fluentci/**/output/
+.fluentci/**/dist/
+.fluentci/**/node_modules/
+
+# FluentCI generated dependency bindings
+.fluentci/**/.fluentci/
+.fluentci/**/fluentci_modules/

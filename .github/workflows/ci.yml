@@ -17,11 +17,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Checkout FluentCI tooling
+        uses: actions/checkout@v4
         with:
-          components: rustfmt, clippy
-
+          ref: ${{ github.workflow_sha }}
+          path: .ci-tooling
+      - uses: fluentci-io/setup-fluentci@next
+      - uses: ./.ci-tooling/.github/actions/fluentci-toolchain
+      - name: Set up rust
+        run: fluentci run setup-rust setup --toolchain stable --components rustfmt,clippy | node "$GITHUB_WORKSPACE/.ci-tooling/.fluentci/github-env.mjs"
+        shell: bash
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
@@ -33,3 +38,6 @@ jobs:
 
       - name: Run tests
         run: cargo test --all-features --verbose
+    defaults:
+      run:
+        shell: bash

@@ -17,8 +17,15 @@ jobs:
 
     steps:
       - name: Checking out sources
-        uses: actions/checkout@v1
-      - uses: actions/cache@v3
+        uses: actions/checkout@v4
+      - name: Checkout FluentCI tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .ci-tooling
+      - uses: fluentci-io/setup-fluentci@next
+      - uses: ./.ci-tooling/.github/actions/fluentci-toolchain
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -27,18 +34,11 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Installing Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-          override: true
+      - name: Set up rust
+        run: fluentci run setup-rust setup --toolchain stable --targets '${{ matrix.target }}' | node "$GITHUB_WORKSPACE/.ci-tooling/.fluentci/github-env.mjs"
+        shell: bash
       - name: Running cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          toolchain: stable
-          args: --locked --release --target ${{ matrix.target }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
       - name: Set env
         run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
       - name: Packaging final binary
@@ -48,10 +48,13 @@ jobs:
           tar czvf piratebay_${{ env.RELEASE_VERSION }}_${{ matrix.target }}.tar.gz piratebay
           shasum -a 256 piratebay_${{ env.RELEASE_VERSION }}_${{ matrix.target }}.tar.gz > piratebay_${{ env.RELEASE_VERSION }}_${{ matrix.target }}.tar.gz.sha256
       - name: Releasing assets
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             target/${{ matrix.target }}/release/piratebay_${{ env.RELEASE_VERSION }}_${{ matrix.target }}.tar.gz
             target/${{ matrix.target }}/release/piratebay_${{ env.RELEASE_VERSION }}_${{ matrix.target }}.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        shell: bash

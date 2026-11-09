@@ -35,6 +35,13 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
+      - name: Checkout FluentCI tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .ci-tooling
+      - uses: fluentci-io/setup-fluentci@next
+      - uses: ./.ci-tooling/.github/actions/fluentci-toolchain
       - name: Set env
         run: |
           if [ -n "${{ inputs.tag }}" ]; then
@@ -75,7 +82,7 @@ jobs:
           shasum -a 512 "$archive" > "$archive.sha512"
 
       - name: Releasing assets
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_VERSION }}
           files: |
@@ -83,3 +90,6 @@ jobs:
             piratebay_${{ env.RELEASE_VERSION }}_${{ matrix.triple }}.tar.gz.sha512
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        shell: bash
