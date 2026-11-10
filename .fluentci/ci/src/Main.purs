@@ -1,19 +1,12 @@
-module Main (dagger, githubAssets, gemfury, flakehub, cachix, importNix, check, python, setupDagger) where
+module Main (githubAssets, gemfury, flakehub, cachix, check, python) where
 
 import Prelude
 import CI.Support as S
-import CI.Dagger as Dagger
 import CI.Gemfury as Gemfury
 import Data.Array as A
 import Data.String as String
 import Effect (Effect)
 import Effect.Exception (throw)
-
--- | Run an existing typed container graph without changing its build environment.
--- | @param directory Directory for relative Dagger module/source paths.
--- | @param arguments Literal argv; environment references expand once in PureScript.
-dagger :: { directory :: String, arguments :: Array String } -> Effect Unit
-dagger = S.dagger
 
 -- | Upload release assets; optionally create a release with generated notes.
 -- | @param directory Directory containing release assets.
@@ -56,22 +49,6 @@ cachix args = do
     token <- S.env "CACHIX_AUTH_TOKEN" ""
     when (String.trim token /= "") (S.runIn args.directory [ command <> [ "push", args.cache, "./result" ] ])
 
--- | Import a container-built Nix closure and optionally push all its store paths.
--- | @param directory Exported closure directory containing store and store-paths.
--- | @param cache Cachix cache name.
-importNix :: { directory :: String, cache :: String } -> Effect Unit
-importNix args = do
-  paths <- S.files args.directory
-  when (A.elem (args.directory <> "/store-paths") paths) do
-    contents <- S.readText (args.directory <> "/store-paths")
-    let stores = A.filter (_ /= "") (map String.trim (String.split (String.Pattern "\n") contents))
-    unless (A.null stores) do
-      directory <- S.absolute args.directory
-      S.run ([ "nix", "copy", "--from", "file://" <> directory <> "/store" ] <> stores)
-      token <- S.env "CACHIX_AUTH_TOKEN" ""
-      when (String.trim token /= "") do
-        S.run ([ "nix", "run", "--no-write-lock-file", "--inputs-from", ".", "nixpkgs#cachix", "--", "push", args.cache ] <> stores)
-
 -- | Verify literal argv expansion and lint every GitHub workflow.
 -- | @param directory Repository checkout whose workflows should be linted.
 check :: { directory :: String } -> Effect Unit
@@ -97,7 +74,3 @@ python args = do
   destination <- S.requiredEnv "GITHUB_ENV"
   previous <- S.readText destination
   S.writeText destination (previous <> "PATH=" <> prefix <> "/bin:" <> path <> "\nVIRTUAL_ENV=" <> prefix <> "\n")
-
--- | Install the repository-pinned Dagger beta with verified upstream checksums.
-setupDagger :: Effect Unit
-setupDagger = Dagger.setup
